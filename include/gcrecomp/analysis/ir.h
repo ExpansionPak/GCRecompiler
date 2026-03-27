@@ -11,12 +11,17 @@ enum class IROp {
     None,
     // Arithmetic
     Add, Sub, Mul, Div,
-    And, Or, Xor, Shl, Shr, 
+    And, Or, Xor, Nor, Shl, Shr, Sar,
+    Rol, Mask, // For rlwinm etc.
     // Memory
-    Load8, Load16, Load32,
-    Store8, Store16, Store32,
+    Load8, Load16, Load32, LoadFloat,
+    Store8, Store16, Store32, StoreFloat,
     // Control Flow
     Branch, BranchCond, Call, Return,
+    // Comparison
+    Cmp, Cmpl,
+    // Floating Point
+    FAdd, FSub, FMul, FDiv,
     // Special
     SetReg, GetReg, // Access physical registers
     SetImm,         // Load immediate to virtual reg

@@ -4,10 +4,19 @@
 *.gcm
 *.bin
 iso/
+
 # Don't include build files
 build/
 CMakeFiles/
+build_errors.txt
+
+# Analysis Artifacts
+cfg.dot
+analysis_log.txt
+
 # Just in case
 .env/
 .vscode/
-*cfg.dot
+
+# Executable
+gcrecomp.exe

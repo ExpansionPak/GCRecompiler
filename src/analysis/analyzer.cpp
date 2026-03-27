@@ -93,6 +93,7 @@ void Analyzer::analyzeBlock(u32 startAddr) {
 
   // Lift to IR
   IRBlock ir = m_lifter.liftBlock(block);
+  m_optimizer.optimizeBlock(ir);
   block.irInstructions = ir.instructions;
 
   m_cfg.addBlock(block);
