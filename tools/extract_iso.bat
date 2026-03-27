@@ -28,7 +28,7 @@ echo [INFO] Extracting ISO... This may take a minute...
 
 if %ERRORLEVEL% EQU 0 (
     echo [SUCCESS] ISO extracted to the 'iso' folder.
-    echo [INFO] You can now run: build\gcrecomp.exe iso\sys\main.dol
+    echo [INFO] You can now run: build\gcrecomp.exe iso\sys\<executable_name>.dol
 ) else (
     echo [ERROR] Extraction failed.
 )

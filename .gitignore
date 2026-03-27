@@ -7,3 +7,6 @@ iso/
 # Don't include build files
 build/
 CMakeFiles/
+# Just in case
+.env/
+.vscode/

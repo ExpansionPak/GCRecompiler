@@ -1,4 +1,5 @@
 #include <gcrecomp/loader/dol.h>
+#include <gcrecomp/analysis/analyzer.h>
 #include <gcrecomp/log.h>
 #include <iostream>
 #include <iomanip>
@@ -30,15 +31,20 @@ int main(int argc, char** argv) {
                   << " (size: 0x" << std::hex << sec.size << ")" << std::endl;
     }
 
-    u32 entry = dol.getEntryPoint();
-    std::cout << "\nFirst Instructions:" << std::endl;
-    for (int i = 0; i < 5; ++i) {
-        u32 addr = entry + i * 4;
-        if (dol.isValidAddress(addr)) {
-            u32 instr = dol.read32(addr);
-            std::cout << "0x" << std::hex << std::setw(8) << std::setfill('0') << addr << ": "
-                      << std::hex << std::setw(8) << std::setfill('0') << instr << std::endl;
-        }
+    LOG_INFO("Starting Control Flow Analysis...");
+    Analyzer analyzer(dol);
+    analyzer.analyze(dol.getEntryPoint());
+
+    const auto& cfg = analyzer.getCfg();
+    LOG_INFO("Analysis Complete. Found %zu basic blocks.", cfg.getBlocks().size());
+
+    std::cout << "\nFirst 10 Basic Blocks:" << std::endl;
+    int count = 0;
+    for (const auto& [addr, block] : cfg.getBlocks()) {
+        std::cout << "Block 0x" << std::hex << std::setw(8) << std::setfill('0') << addr 
+                  << " - 0x" << std::hex << std::setw(8) << std::setfill('0') << block.endAddr
+                  << " (" << std::dec << block.instructions.size() << " instructions)" << std::endl;
+        if (++count >= 10) break;
     }
 
     return 0;
