@@ -291,6 +291,27 @@ static inline u32 ADDIC(CPUContext* ctx, u32 a, u32 b) {
     return result;
 }
 
+static inline u32 PPC_DIVWU(CPUContext* ctx, u32 dividend, u32 divisor) {
+    (void)ctx;
+    if (divisor == 0) {
+        return 0;
+    }
+    return dividend / divisor;
+}
+
+static inline u32 PPC_DIVW(CPUContext* ctx, u32 dividend, u32 divisor) {
+    (void)ctx;
+    const s32 lhs = (s32)dividend;
+    const s32 rhs = (s32)divisor;
+    if (rhs == 0) {
+        return 0;
+    }
+    if (lhs == INT32_MIN && rhs == -1) {
+        return 0;
+    }
+    return (u32)(lhs / rhs);
+}
+
 static inline void LMW(CPUContext* ctx, u32 startReg, u32 base, u32 simm) {
     u32 addr = base + simm;
     for (u32 reg = startReg; reg < 32; ++reg) {

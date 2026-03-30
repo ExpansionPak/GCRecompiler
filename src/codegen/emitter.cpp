@@ -189,7 +189,8 @@ std::string Emitter::emitInstruction(const IRInstruction& instr,
         case IROp::Add:    return destGpr(0) + " = " + gpr(1) + " + " + gpr(2) + ";";
         case IROp::Sub:    return destGpr(0) + " = " + gpr(1) + " - " + gpr(2) + ";";
         case IROp::Mul:    return destGpr(0) + " = " + gpr(1) + " * " + gpr(2) + ";";
-        case IROp::Div:    return destGpr(0) + " = " + gpr(1) + " / " + gpr(2) + ";";
+        case IROp::DivS:   return destGpr(0) + " = PPC_DIVW(ctx, " + gpr(1) + ", " + gpr(2) + ");";
+        case IROp::DivU:   return destGpr(0) + " = PPC_DIVWU(ctx, " + gpr(1) + ", " + gpr(2) + ");";
         case IROp::And:    return destGpr(0) + " = " + gpr(1) + " & " + gpr(2) + ";";
         case IROp::Or:     return destGpr(0) + " = " + gpr(1) + " | " + gpr(2) + ";";
         case IROp::Xor:    return destGpr(0) + " = " + gpr(1) + " ^ " + gpr(2) + ";";

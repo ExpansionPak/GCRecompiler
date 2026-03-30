@@ -326,8 +326,9 @@ void Lifter::liftInstruction(const Instruction& instr, std::vector<IRInstruction
                 case 467: out.push_back({ IROp::Mtspr, { IROperand::Imm(decodeSpr(ra, rb)), IROperand::Reg(rs) } }); break;
                 case 476: out.push_back({ IROp::Nand, { IROperand::Reg(ra), IROperand::Reg(rs), IROperand::Reg(rb) } });
                           maybeEmitRecordCompare(out, raw, ra); break;
-                case 459:
-                case 491: out.push_back({ IROp::Div, { IROperand::Reg(rd), IROperand::Reg(ra), IROperand::Reg(rb) } });
+                case 459: out.push_back({ IROp::DivU, { IROperand::Reg(rd), IROperand::Reg(ra), IROperand::Reg(rb) } });
+                          maybeEmitRecordCompare(out, raw, rd); break;
+                case 491: out.push_back({ IROp::DivS, { IROperand::Reg(rd), IROperand::Reg(ra), IROperand::Reg(rb) } });
                           maybeEmitRecordCompare(out, raw, rd); break;
                 case 536: out.push_back({ IROp::Shr, { IROperand::Reg(ra), IROperand::Reg(rs), IROperand::Reg(rb) } });
                           maybeEmitRecordCompare(out, raw, ra); break;

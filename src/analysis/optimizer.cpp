@@ -20,7 +20,8 @@ bool writesAnyGprValue(const IRInstruction& instr) {
         case IROp::Add:
         case IROp::Sub:
         case IROp::Mul:
-        case IROp::Div:
+        case IROp::DivS:
+        case IROp::DivU:
         case IROp::And:
         case IROp::Or:
         case IROp::Xor:
@@ -62,7 +63,8 @@ bool writesPureGprValue(const IRInstruction& instr) {
         case IROp::Add:
         case IROp::Sub:
         case IROp::Mul:
-        case IROp::Div:
+        case IROp::DivS:
+        case IROp::DivU:
         case IROp::And:
         case IROp::Or:
         case IROp::Xor:

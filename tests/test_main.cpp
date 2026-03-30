@@ -262,7 +262,23 @@ bool testLifterDivwu() {
     instr.raw = encodeX(3, 4, 5, 459);
 
     IRInstruction ir = liftSingle(instr);
-    return ir.op == IROp::Div &&
+    return ir.op == IROp::DivU &&
+           ir.operands.size() == 3 &&
+           ir.operands[0].type == IROperandType::Register &&
+           ir.operands[0].value == 3 &&
+           ir.operands[1].type == IROperandType::Register &&
+           ir.operands[1].value == 4 &&
+           ir.operands[2].type == IROperandType::Register &&
+           ir.operands[2].value == 5;
+}
+
+bool testLifterDivw() {
+    Instruction instr {};
+    instr.address = 0x8000001C;
+    instr.raw = encodeX(3, 4, 5, 491);
+
+    IRInstruction ir = liftSingle(instr);
+    return ir.op == IROp::DivS &&
            ir.operands.size() == 3 &&
            ir.operands[0].type == IROperandType::Register &&
            ir.operands[0].value == 3 &&
@@ -282,6 +298,8 @@ bool testEmitterUsesNewHelpers() {
 
     BasicBlock block;
     block.startAddr = 0x80000000;
+    block.irInstructions.push_back({ IROp::DivU, { IROperand::Reg(3), IROperand::Reg(4), IROperand::Reg(5) } });
+    block.irInstructions.push_back({ IROp::DivS, { IROperand::Reg(6), IROperand::Reg(7), IROperand::Reg(8) } });
     block.irInstructions.push_back({ IROp::Mask, { IROperand::Reg(3), IROperand::Reg(3), IROperand::Imm(5), IROperand::Imm(10) } });
     block.irInstructions.push_back({ IROp::Fctiw, { IROperand::FReg(1), IROperand::FReg(2) } });
     block.irInstructions.push_back({ IROp::CallIndirect, { IROperand::Special(IRSpecialRegister::CountRegister) } });
@@ -290,7 +308,9 @@ bool testEmitterUsesNewHelpers() {
 
     Emitter emitter;
     const std::string emitted = emitter.emitFunction(function, cfg);
-    return emitted.find("MASK32(") != std::string::npos &&
+    return emitted.find("PPC_DIVWU(ctx, ctx->gpr[4], ctx->gpr[5]);") != std::string::npos &&
+           emitted.find("PPC_DIVW(ctx, ctx->gpr[7], ctx->gpr[8]);") != std::string::npos &&
+           emitted.find("MASK32(") != std::string::npos &&
            emitted.find("FCTIW(") != std::string::npos &&
            emitted.find("call_by_addr(ctx, ctx->ctr);") != std::string::npos &&
            emitted.find("ctx->msr = get_spr(ctx, 0x1b); call_by_addr(ctx, get_spr(ctx, 0x1a)); return;") != std::string::npos;
@@ -537,6 +557,22 @@ bool testRuntimeHelpers() {
         return false;
     }
 
+    if (PPC_DIVWU(&ctx, 12u, 3u) != 4u) {
+        return false;
+    }
+    if (PPC_DIVWU(&ctx, 12u, 0u) != 0u) {
+        return false;
+    }
+    if ((s32)PPC_DIVW(&ctx, (u32)-12, (u32)3) != -4) {
+        return false;
+    }
+    if (PPC_DIVW(&ctx, 12u, 0u) != 0u) {
+        return false;
+    }
+    if (PPC_DIVW(&ctx, 0x80000000u, 0xFFFFFFFFu) != 0u) {
+        return false;
+    }
+
     ctx.msr = 0x42u;
     if (ctx.msr != 0x42u) {
         return false;
@@ -681,6 +717,7 @@ int main() {
         { "lifter_interrupt_return", testLifterInterruptReturn },
         { "lifter_record_cr0", testLifterRecordFormUpdatesCr0 },
         { "lifter_divwu", testLifterDivwu },
+        { "lifter_divw", testLifterDivw },
         { "emitter_helpers", testEmitterUsesNewHelpers },
         { "emitter_resume_pc", testEmitterResumesAtSavedPc },
         { "emitter_lr_returns", testEmitterTreatsLrBranchesAsReturns },

@@ -13,7 +13,7 @@ enum class IROp {
     And, Or, Xor, Nor, Andc, Orc, Nand, Shl, Shr, Sar,
     Rol, Mask, // For rlwinm etc.
     Rlwimi,    // For rlwimi
-    Add, Sub, Mul, Div, Addic,
+    Add, Sub, Mul, DivS, DivU, Addic,
     // Bit Manipulation
     Extsb, Extsh, Cntlzw,
     // Memory
