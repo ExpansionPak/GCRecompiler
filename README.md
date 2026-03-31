@@ -3,3 +3,5 @@
 Work-In-Progress tool to take GameCube .dol and .iso files then recompile them to human-readable C code.
 
 TODO: Add CONTRIBUTORS.md
+
+https://github.com/dolphin-emu/dolphin Dolphin Emulator has been a huge help in researching the GameCube. 
