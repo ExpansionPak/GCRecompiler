@@ -23,7 +23,9 @@ public:
     std::string emitBlock(const BasicBlock& block);
 
 private:
-    std::string emitInstruction(const IRInstruction& instr, const Function& func);
+    std::string emitInstruction(const IRInstruction& instr,
+                                const std::set<u32>& emittedBlocks,
+                                const std::set<u32>& localResumeTargets);
     std::string operandToC(const IROperand& op);
     std::string regOrImm(const IROperand& op);
     std::string fRegOrImm(const IROperand& op);

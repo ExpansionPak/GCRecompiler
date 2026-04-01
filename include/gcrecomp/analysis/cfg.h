@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 #include <memory>
+#include <optional>
 
 namespace gcrecomp {
 
@@ -19,6 +20,13 @@ enum class BlockType {
 };
 
 struct BasicBlock {
+    struct LocalJumpTable {
+        u32 indexRegister = 0;
+        u32 defaultTarget = 0;
+        size_t patternStartInstructionIndex = 0;
+        std::vector<u32> targets;
+    };
+
     u32 startAddr;
     u32 endAddr;
     std::vector<Instruction> instructions;
@@ -27,6 +35,7 @@ struct BasicBlock {
     std::set<u32> predecessors;
     BlockType type = BlockType::Normal;
     bool isAnalyzed = false;
+    std::optional<LocalJumpTable> localJumpTable;
 };
 
 struct Function {
@@ -39,10 +48,12 @@ class ControlFlowGraph {
 public:
     void addBlock(const BasicBlock& block);
     BasicBlock* getBlock(u32 addr);
+    const BasicBlock* getBlock(u32 addr) const;
     const std::map<u32, BasicBlock>& getBlocks() const { return m_blocks; }
 
     void addFunction(const Function& func);
     Function* getFunction(u32 addr);
+    const Function* getFunction(u32 addr) const;
     const std::map<u32, Function>& getFunctions() const { return m_functions; }
 
     void exportDot(const std::string& path) const;

@@ -10,6 +10,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <optional>
 
 namespace gcrecomp {
 
@@ -31,8 +32,9 @@ private:
     std::set<u32> m_discoveredFunctions;
     std::set<u32> m_analyzedFunctions;
 
+    bool registerFunction(u32 addr, const std::string& name);
     void analyzeFunction(u32 entryAddr);
-    void analyzeBlock(u32 startAddr, Function& currentFunc, const std::set<u32>& seeds);
+    void analyzeBlock(u32 startAddr, Function& currentFunc, std::set<u32>& pendingBlocks);
 };
 
 } // namespace gcrecomp

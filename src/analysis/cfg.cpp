@@ -16,11 +16,27 @@ BasicBlock* ControlFlowGraph::getBlock(u32 addr) {
     return nullptr;
 }
 
+const BasicBlock* ControlFlowGraph::getBlock(u32 addr) const {
+    auto it = m_blocks.find(addr);
+    if (it != m_blocks.end()) {
+        return &it->second;
+    }
+    return nullptr;
+}
+
 void ControlFlowGraph::addFunction(const Function& func) {
     m_functions[func.startAddr] = func;
 }
 
 Function* ControlFlowGraph::getFunction(u32 addr) {
+    auto it = m_functions.find(addr);
+    if (it != m_functions.end()) {
+        return &it->second;
+    }
+    return nullptr;
+}
+
+const Function* ControlFlowGraph::getFunction(u32 addr) const {
     auto it = m_functions.find(addr);
     if (it != m_functions.end()) {
         return &it->second;

@@ -9,6 +9,8 @@ iso/
 build/
 CMakeFiles/
 build_errors.txt
+build-codex/
+.vs/
 
 # Analysis Artifacts
 cfg.dot
