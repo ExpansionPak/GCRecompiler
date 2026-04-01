@@ -4,4 +4,5 @@ Work-In-Progress tool to take GameCube .dol and .iso files then recompile them t
 
 TODO: Add CONTRIBUTORS.md
 
-Main repo at ExpansionPak, this is a fork focused on experimental features. This will eventually be merged.
+Dolphin Emulator has been a huge help in researching the GameCube.
+https://github.com/dolphin-emu/dolphin
