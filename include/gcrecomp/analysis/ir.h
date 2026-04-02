@@ -27,6 +27,7 @@ enum class IROp {
     CrAnd, CrOr, CrXor, CrNor,
     // Floating Point
     FAdd, FSub, FMul, FDiv, FMadd, FMsub, FCmpo, FCmpu, FSel, Fctiw, Frsp,
+    FNeg, FAbs, Fnabs,
     // System / Special
     SetReg, GetReg, // Access physical registers
     SetImm,         // Load immediate to virtual reg

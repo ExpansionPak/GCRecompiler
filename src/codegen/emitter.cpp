@@ -258,6 +258,9 @@ std::string Emitter::emitInstruction(const IRInstruction& instr,
         case IROp::FSel:  return destFpr(0) + " = FSEL(" + fpr(1) + ", " + fpr(2) + ", " + fpr(3) + ");";
         case IROp::Fctiw: return destFpr(0) + " = FCTIW(" + fpr(1) + ");";
         case IROp::Frsp:  return destFpr(0) + " = FRSP(" + fpr(1) + ");";
+        case IROp::FNeg:  return destFpr(0) + " = -" + fpr(1) + ";";
+        case IROp::FAbs:  return destFpr(0) + " = fabs(" + fpr(1) + ");";
+        case IROp::Fnabs: return destFpr(0) + " = -fabs(" + fpr(1) + ");";
         case IROp::SetReg:
             if (instr.operands[0].regClass == IRRegisterClass::FPR) {
                 return destFpr(0) + " = " + fpr(1) + ";";

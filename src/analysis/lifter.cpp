@@ -514,7 +514,10 @@ void Lifter::liftInstruction(const Instruction& instr, std::vector<IRInstruction
                 case 15: out.push_back({ IROp::Fctiw, { IROperand::FReg(rd), IROperand::FReg(rb) } }); break;
                 case 23: out.push_back({ IROp::FSel, { IROperand::FReg(rd), IROperand::FReg(ra), IROperand::FReg(rb), IROperand::FReg(frc) } }); break;
                 case 32: out.push_back({ IROp::FCmpo, { IROperand::Imm(decodeCrField(raw)), IROperand::FReg(ra), IROperand::FReg(rb) } }); break;
+                case 40: out.push_back({ IROp::FNeg, { IROperand::FReg(rd), IROperand::FReg(rb) } }); break;
                 case 72: out.push_back({ IROp::SetReg, { IROperand::FReg(rd), IROperand::FReg(rb) } }); break; // fmr
+                case 136: out.push_back({ IROp::Fnabs, { IROperand::FReg(rd), IROperand::FReg(rb) } }); break;
+                case 264: out.push_back({ IROp::FAbs, { IROperand::FReg(rd), IROperand::FReg(rb) } }); break;
                 default:
                     break;
             }

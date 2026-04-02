@@ -106,6 +106,10 @@ u32 encodeAForm(u32 op, u32 frt, u32 fra, u32 frb, u32 frc, u32 xo5) {
     return (op << 26) | (frt << 21) | (fra << 16) | (frb << 11) | (frc << 6) | (xo5 << 1);
 }
 
+u32 encodeFUnary(u32 frt, u32 frb, u32 xop) {
+    return (63u << 26) | (frt << 21) | (frb << 11) | (xop << 1);
+}
+
 u32 encodeXfx(u32 xop, u32 rt, u32 spr) {
     const u32 sprLo = spr & 0x1F;
     const u32 sprHi = (spr >> 5) & 0x1F;
@@ -394,6 +398,45 @@ bool testLifterFloatingAFormOperands() {
            fmaddIr.operands[3].value == 9;
 }
 
+bool testLifterFloatingUnaryOps() {
+    Instruction fneg {};
+    fneg.address = 0x80000030;
+    fneg.raw = encodeFUnary(28, 2, 40);
+    IRInstruction fnegIr = liftSingle(fneg);
+    if (fnegIr.op != IROp::FNeg ||
+        fnegIr.operands.size() != 2 ||
+        fnegIr.operands[0].regClass != IRRegisterClass::FPR ||
+        fnegIr.operands[0].value != 28 ||
+        fnegIr.operands[1].regClass != IRRegisterClass::FPR ||
+        fnegIr.operands[1].value != 2) {
+        return false;
+    }
+
+    Instruction fnabs {};
+    fnabs.address = 0x80000034;
+    fnabs.raw = encodeFUnary(5, 6, 136);
+    IRInstruction fnabsIr = liftSingle(fnabs);
+    if (fnabsIr.op != IROp::Fnabs ||
+        fnabsIr.operands.size() != 2 ||
+        fnabsIr.operands[0].regClass != IRRegisterClass::FPR ||
+        fnabsIr.operands[0].value != 5 ||
+        fnabsIr.operands[1].regClass != IRRegisterClass::FPR ||
+        fnabsIr.operands[1].value != 6) {
+        return false;
+    }
+
+    Instruction fabsInstr {};
+    fabsInstr.address = 0x80000038;
+    fabsInstr.raw = encodeFUnary(7, 8, 264);
+    IRInstruction fabsIr = liftSingle(fabsInstr);
+    return fabsIr.op == IROp::FAbs &&
+           fabsIr.operands.size() == 2 &&
+           fabsIr.operands[0].regClass == IRRegisterClass::FPR &&
+           fabsIr.operands[0].value == 7 &&
+           fabsIr.operands[1].regClass == IRRegisterClass::FPR &&
+           fabsIr.operands[1].value == 8;
+}
+
 bool testEmitterUsesNewHelpers() {
     ControlFlowGraph cfg;
     Function function;
@@ -412,6 +455,9 @@ bool testEmitterUsesNewHelpers() {
     block.irInstructions.push_back({ IROp::FCmpo, { IROperand::Imm(2), IROperand::FReg(3), IROperand::FReg(4) } });
     block.irInstructions.push_back({ IROp::FCmpu, { IROperand::Imm(5), IROperand::FReg(6), IROperand::FReg(7) } });
     block.irInstructions.push_back({ IROp::Fctiw, { IROperand::FReg(1), IROperand::FReg(2) } });
+    block.irInstructions.push_back({ IROp::FNeg, { IROperand::FReg(8), IROperand::FReg(9) } });
+    block.irInstructions.push_back({ IROp::FAbs, { IROperand::FReg(10), IROperand::FReg(11) } });
+    block.irInstructions.push_back({ IROp::Fnabs, { IROperand::FReg(12), IROperand::FReg(13) } });
     block.irInstructions.push_back({ IROp::CallIndirect, { IROperand::Special(IRSpecialRegister::CountRegister) } });
     block.irInstructions.push_back({ IROp::Rfi, {} });
     cfg.addBlock(block);
@@ -426,6 +472,9 @@ bool testEmitterUsesNewHelpers() {
            emitted.find("set_fp_cr_field(ctx, 0x2, ctx->fpr[3], ctx->fpr[4], 1);") != std::string::npos &&
            emitted.find("set_fp_cr_field(ctx, 0x5, ctx->fpr[6], ctx->fpr[7], 0);") != std::string::npos &&
            emitted.find("FCTIW(") != std::string::npos &&
+           emitted.find("ctx->fpr[8] = -ctx->fpr[9];") != std::string::npos &&
+           emitted.find("ctx->fpr[10] = fabs(ctx->fpr[11]);") != std::string::npos &&
+           emitted.find("ctx->fpr[12] = -fabs(ctx->fpr[13]);") != std::string::npos &&
            emitted.find("call_by_addr(ctx, ctx->ctr);") != std::string::npos &&
            emitted.find("ctx->msr = get_spr(ctx, 0x1b); call_by_addr(ctx, get_spr(ctx, 0x1a)); return;") != std::string::npos;
 }
@@ -1105,6 +1154,7 @@ int main() {
         { "lifter_divw", testLifterDivw },
         { "lifter_fcmp", testLifterFloatingCompare },
         { "lifter_fpu_aform_operands", testLifterFloatingAFormOperands },
+        { "lifter_fpu_unary_ops", testLifterFloatingUnaryOps },
         { "emitter_helpers", testEmitterUsesNewHelpers },
         { "emitter_resume_pc", testEmitterResumesAtSavedPc },
         { "emitter_lr_returns", testEmitterTreatsLrBranchesAsReturns },
