@@ -331,36 +331,67 @@ std::optional<BasicBlock::LocalJumpTable> detectLocalJumpTable(
         return std::nullopt;
     }
 
-    u32 computedOffsetReg = 0;
     u32 indexReg = 0;
-    if (!decodeScaleWordOffset(block.instructions[count - 4].raw, computedOffsetReg, indexReg) ||
-        computedOffsetReg != offsetReg) {
+    size_t scaleInstructionIndex = count;
+    for (size_t i = count - 3; i-- > 0;) {
+        u32 computedOffsetReg = 0;
+        u32 candidateIndexReg = 0;
+        if (!decodeScaleWordOffset(block.instructions[i].raw, computedOffsetReg, candidateIndexReg) ||
+            computedOffsetReg != offsetReg) {
+            continue;
+        }
+
+        scaleInstructionIndex = i;
+        indexReg = candidateIndexReg;
+        break;
+    }
+
+    if (scaleInstructionIndex == count) {
         return std::nullopt;
     }
 
     u32 tableBaseReg = 0;
     s16 tableBaseHi = 0;
+    size_t tableBaseInstructionIndex = count;
     bool foundTableBase = false;
-    for (size_t i = 0; i + 1 < count - 3; ++i) {
+    for (size_t i = 0; i < count - 3; ++i) {
         u32 lisRt = 0;
         s16 lisImm = 0;
         if (!decodeLis(block.instructions[i].raw, lisRt, lisImm) || lisRt != tableReg) {
             continue;
         }
 
-        u32 addiRt = 0;
-        u32 addiRa = 0;
-        s16 addiImm = 0;
-        if (!decodeAddi(block.instructions[i + 1].raw, addiRt, addiRa, addiImm) ||
-            addiRt != tableReg || addiRa != tableReg) {
-            continue;
+        for (size_t j = i + 1; j < count - 2; ++j) {
+            const u32 candidateRaw = block.instructions[j].raw;
+            if (isControlFlowBoundary(candidateRaw)) {
+                break;
+            }
+
+            u32 nextLisRt = 0;
+            s16 nextLisImm = 0;
+            if (decodeLis(candidateRaw, nextLisRt, nextLisImm) && nextLisRt == tableReg) {
+                break;
+            }
+
+            u32 addiRt = 0;
+            u32 addiRa = 0;
+            s16 addiImm = 0;
+            if (!decodeAddi(candidateRaw, addiRt, addiRa, addiImm) ||
+                addiRt != tableReg || addiRa != tableReg) {
+                continue;
+            }
+
+            tableBaseReg = (static_cast<u32>(static_cast<u16>(lisImm)) << 16) +
+                static_cast<u32>(static_cast<s32>(addiImm));
+            tableBaseHi = lisImm;
+            tableBaseInstructionIndex = i;
+            foundTableBase = true;
+            break;
         }
 
-        tableBaseReg = (static_cast<u32>(static_cast<u16>(lisImm)) << 16) +
-            static_cast<u32>(static_cast<s32>(addiImm));
-        tableBaseHi = lisImm;
-        foundTableBase = true;
-        break;
+        if (foundTableBase) {
+            break;
+        }
     }
 
     if (!foundTableBase || tableBaseHi == 0) {
@@ -398,7 +429,7 @@ std::optional<BasicBlock::LocalJumpTable> detectLocalJumpTable(
     BasicBlock::LocalJumpTable jumpTable;
     jumpTable.indexRegister = indexReg;
     jumpTable.defaultTarget = defaultTarget;
-    jumpTable.patternStartInstructionIndex = count - 4;
+    jumpTable.patternStartInstructionIndex = std::min(scaleInstructionIndex, tableBaseInstructionIndex);
 
     for (u32 i = 0; i <= maxIndex; ++i) {
         u32 target = 0;

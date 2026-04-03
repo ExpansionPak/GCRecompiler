@@ -743,6 +743,46 @@ bool testAnalyzerEmitsLocalJumpTablesAsSwitches() {
            emitted.find("label_0x80000034:") != std::string::npos;
 }
 
+bool testAnalyzerHandlesInterleavedJumpTableSetup() {
+    TestBinary binary;
+    binary.setTextWords(0x80000000u, {
+        0x9421FFF0u,                                  // stwu r1, -16(r1)
+        encodeCmpli(0, 0, 1),                         // cmplwi r0, 1
+        encodeBcRelative(0x80000008u, 12, 1, 0x80000030u),
+        encodeAddis(4, 0, static_cast<s16>(0x8000)), // lis r4, 0x8000
+        encodeRlwinm(0, 0, 2, 0, 29),                // rlwinm r0, r0, 2, 0, 29
+        encodeAddi(4, 4, 0x100),                     // addi r4, r4, 0x100
+        encodeX(0, 4, 0, 23),                        // lwzx r0, r4, r0
+        encodeMtspr(0, 9),                           // mtctr r0
+        0x4E800420u,                                 // bctr
+        0x4E800020u,                                 // blr (case 0 target at 0x80000024)
+        encodeAddi(31, 0, 1),                        // li r31, 1 (case 1 target)
+        0x4E800020u,                                 // blr
+        encodeAddi(31, 0, 2),                        // li r31, 2 (default target)
+        0x4E800020u,                                 // blr
+    });
+    binary.addDataWords(0x80000100u, {
+        0x80000024u,
+        0x80000028u,
+    });
+
+    Analyzer analyzer(binary);
+    analyzer.analyze(binary.getEntryPoint());
+
+    const Function* function = analyzer.getCfg().getFunction(0x80000000u);
+    if (function == nullptr) {
+        return false;
+    }
+
+    Emitter emitter;
+    const std::string emitted = emitter.emitFunction(*function, analyzer.getCfg());
+    return emitted.find("switch (ctx->gpr[0])") != std::string::npos &&
+           emitted.find("case 0: goto label_0x80000024;") != std::string::npos &&
+           emitted.find("case 1: goto label_0x80000028;") != std::string::npos &&
+           emitted.find("label_0x80000024:") != std::string::npos &&
+           emitted.find("label_0x80000028:") != std::string::npos;
+}
+
 bool testLifterPreservesClobberedLocalJumpTableIndex() {
     TestBinary binary;
     binary.setTextWords(0x80000000u, {
@@ -1200,6 +1240,7 @@ int main() {
         { "emitter_preserves_lr_indirect_target", testEmitterPreservesLrIndirectCallTarget },
         { "emitter_logs_unexpected_local_resume_targets", testEmitterLogsUnexpectedLocalResumeTargets },
         { "analyzer_local_jump_tables", testAnalyzerEmitsLocalJumpTablesAsSwitches },
+        { "analyzer_interleaved_jump_table_setup", testAnalyzerHandlesInterleavedJumpTableSetup },
         { "lifter_clobbered_local_jump_table_index", testLifterPreservesClobberedLocalJumpTableIndex },
         { "optimizer_safety", testOptimizerKeepsStoreSourcesAndFprsSeparate },
         { "optimizer_load_clobbers", testOptimizerClearsConstantsAfterLoadClobbers },
