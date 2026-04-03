@@ -533,6 +533,41 @@ bool testEmitterTreatsLrBranchesAsReturns() {
            emitted.find("call_by_addr(ctx, ctx->lr);") == std::string::npos;
 }
 
+bool testEmitterDispatchesLocalCtrBranches() {
+    ControlFlowGraph cfg;
+    Function function;
+    function.startAddr = 0x80000000u;
+    function.name = "ctr_branch_fn";
+    function.blocks.insert(0x80000000u);
+    function.blocks.insert(0x80000010u);
+    function.blocks.insert(0x80000020u);
+    cfg.addFunction(function);
+
+    BasicBlock entryBlock;
+    entryBlock.startAddr = 0x80000000u;
+    entryBlock.irInstructions.push_back({ IROp::BranchIndirect, {
+        IROperand::Special(IRSpecialRegister::CountRegister)
+    } });
+    cfg.addBlock(entryBlock);
+
+    BasicBlock targetA;
+    targetA.startAddr = 0x80000010u;
+    targetA.irInstructions.push_back({ IROp::Return, {} });
+    cfg.addBlock(targetA);
+
+    BasicBlock targetB;
+    targetB.startAddr = 0x80000020u;
+    targetB.irInstructions.push_back({ IROp::Return, {} });
+    cfg.addBlock(targetB);
+
+    Emitter emitter;
+    const std::string emitted = emitter.emitFunction(function, cfg);
+    return emitted.find("const uint32_t branch_target = ctx->ctr; switch (branch_target)") != std::string::npos &&
+           emitted.find("case 0x80000010: goto label_0x80000010;") != std::string::npos &&
+           emitted.find("case 0x80000020: goto label_0x80000020;") != std::string::npos &&
+           emitted.find("default: call_by_addr(ctx, branch_target); return;") != std::string::npos;
+}
+
 bool testEmitterDoesNotInventLocalLrResumes() {
     ControlFlowGraph cfg;
     Function function;
@@ -1158,6 +1193,7 @@ int main() {
         { "emitter_helpers", testEmitterUsesNewHelpers },
         { "emitter_resume_pc", testEmitterResumesAtSavedPc },
         { "emitter_lr_returns", testEmitterTreatsLrBranchesAsReturns },
+        { "emitter_ctr_locals", testEmitterDispatchesLocalCtrBranches },
         { "emitter_no_fake_lr_resumes", testEmitterDoesNotInventLocalLrResumes },
         { "emitter_ignores_missing_seed_blocks", testEmitterIgnoresMissingFunctionSeedBlocks },
         { "emitter_sets_lr_for_external_calls", testEmitterSetsLrForExternalCalls },

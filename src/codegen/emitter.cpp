@@ -190,6 +190,22 @@ std::string Emitter::emitInstruction(const IRInstruction& instr,
                static_cast<IRSpecialRegister>(op.value) == IRSpecialRegister::LinkRegister;
     };
 
+    auto isCountRegisterTarget = [&](const IROperand& op) {
+        return op.type == IROperandType::SpecialRegister &&
+               static_cast<IRSpecialRegister>(op.value) == IRSpecialRegister::CountRegister;
+    };
+
+    auto emitLocalBlockDispatchOrExternal = [&](const std::string& targetExpr) {
+        std::stringstream ss;
+        ss << "do { const uint32_t branch_target = " << targetExpr << "; switch (branch_target) { ";
+        for (u32 blockAddr : emittedBlocks) {
+            ss << "case " << formatHex(blockAddr) << ": goto label_0x"
+               << formatImmediate(blockAddr).substr(2) << "; ";
+        }
+        ss << "default: call_by_addr(ctx, branch_target); return; } } while (0);";
+        return ss.str();
+    };
+
     switch (instr.op) {
         case IROp::SetImm: return destGpr(0) + " = " + operandToC(instr.operands[1]) + ";";
         case IROp::Add:    return destGpr(0) + " = " + gpr(1) + " + " + gpr(2) + ";";
@@ -297,6 +313,8 @@ std::string Emitter::emitInstruction(const IRInstruction& instr,
                 ss << "goto label_0x" << std::hex << target.value << ";";
             } else if (isLinkRegisterTarget(target)) {
                 ss << emitLocalResumeOrReturn("ctx->lr");
+            } else if (isCountRegisterTarget(target)) {
+                ss << emitLocalBlockDispatchOrExternal("ctx->ctr");
             } else if (target.type == IROperandType::Address) {
                 ss << "call_by_addr(ctx, " << formatHex(target.value) << "); return;";
             } else {
@@ -309,6 +327,9 @@ std::string Emitter::emitInstruction(const IRInstruction& instr,
         case IROp::BranchIndirect:
             if (isLinkRegisterTarget(instr.operands[0])) {
                 return emitLocalResumeOrReturn("ctx->lr");
+            }
+            if (isCountRegisterTarget(instr.operands[0])) {
+                return emitLocalBlockDispatchOrExternal("ctx->ctr");
             }
             return "call_by_addr(ctx, " + branchTarget(instr.operands[0]) + "); return;";
 
