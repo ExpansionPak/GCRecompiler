@@ -481,7 +481,477 @@ static inline f64 FCTIW(f64 value) {
     return result;
 }
 
+static inline f64 FCTIWZ(f64 value) {
+    s32 converted;
+    u64 bits;
+    f64 result;
+    if (value >= 2147483647.0) {
+        converted = 0x7FFFFFFF;
+    } else if (value <= -2147483648.0) {
+        converted = (s32)0x80000000;
+    } else {
+        converted = (s32)value; /* C truncates toward zero */
+    }
+    bits = 0xFFF8000000000000ull | (u32)converted;
+    memcpy(&result, &bits, sizeof(result));
+    return result;
+}
+
+/* ---------- Carry-chained arithmetic ---------- */
+
+#define XER_CA_BIT 0x20000000u
+
+static inline u32 PPC_SUBFC(CPUContext* ctx, u32 ra, u32 rb) {
+    const u32 result = ~ra + rb + 1u;
+    if (rb == 0u && ra != 0u) {
+        ctx->xer &= ~XER_CA_BIT;
+    } else if (result <= rb || (ra == 0u)) {
+        ctx->xer |= XER_CA_BIT;
+    } else {
+        ctx->xer &= ~XER_CA_BIT;
+    }
+    /* Precise carry: (~ra + rb + 1) carries iff (u64)(~ra) + rb + 1 > 0xFFFFFFFF */
+    {
+        const u64 wide = (u64)(~ra) + (u64)rb + 1ull;
+        if (wide > 0xFFFFFFFFull) ctx->xer |= XER_CA_BIT;
+        else ctx->xer &= ~XER_CA_BIT;
+    }
+    return result;
+}
+
+static inline u32 PPC_ADDC(CPUContext* ctx, u32 ra, u32 rb) {
+    const u32 result = ra + rb;
+    if (result < ra) {
+        ctx->xer |= XER_CA_BIT;
+    } else {
+        ctx->xer &= ~XER_CA_BIT;
+    }
+    return result;
+}
+
+static inline u32 PPC_SUBFE(CPUContext* ctx, u32 ra, u32 rb) {
+    const u32 ca = (ctx->xer & XER_CA_BIT) ? 1u : 0u;
+    const u64 wide = (u64)(~ra) + (u64)rb + (u64)ca;
+    const u32 result = (u32)wide;
+    if (wide > 0xFFFFFFFFull) ctx->xer |= XER_CA_BIT;
+    else ctx->xer &= ~XER_CA_BIT;
+    return result;
+}
+
+static inline u32 PPC_ADDE(CPUContext* ctx, u32 ra, u32 rb) {
+    const u32 ca = (ctx->xer & XER_CA_BIT) ? 1u : 0u;
+    const u64 wide = (u64)ra + (u64)rb + (u64)ca;
+    const u32 result = (u32)wide;
+    if (wide > 0xFFFFFFFFull) ctx->xer |= XER_CA_BIT;
+    else ctx->xer &= ~XER_CA_BIT;
+    return result;
+}
+
+static inline u32 PPC_SUBFZE(CPUContext* ctx, u32 ra) {
+    const u32 ca = (ctx->xer & XER_CA_BIT) ? 1u : 0u;
+    const u64 wide = (u64)(~ra) + (u64)ca;
+    const u32 result = (u32)wide;
+    if (wide > 0xFFFFFFFFull) ctx->xer |= XER_CA_BIT;
+    else ctx->xer &= ~XER_CA_BIT;
+    return result;
+}
+
+static inline u32 PPC_ADDZE(CPUContext* ctx, u32 ra) {
+    const u32 ca = (ctx->xer & XER_CA_BIT) ? 1u : 0u;
+    const u64 wide = (u64)ra + (u64)ca;
+    const u32 result = (u32)wide;
+    if (wide > 0xFFFFFFFFull) ctx->xer |= XER_CA_BIT;
+    else ctx->xer &= ~XER_CA_BIT;
+    return result;
+}
+
+static inline u32 PPC_SUBFME(CPUContext* ctx, u32 ra) {
+    const u32 ca = (ctx->xer & XER_CA_BIT) ? 1u : 0u;
+    const u64 wide = (u64)(~ra) + 0xFFFFFFFFull + (u64)ca;
+    const u32 result = (u32)wide;
+    if (wide > 0xFFFFFFFFull) ctx->xer |= XER_CA_BIT;
+    else ctx->xer &= ~XER_CA_BIT;
+    return result;
+}
+
+static inline u32 PPC_ADDME(CPUContext* ctx, u32 ra) {
+    const u32 ca = (ctx->xer & XER_CA_BIT) ? 1u : 0u;
+    const u64 wide = (u64)ra + 0xFFFFFFFFull + (u64)ca;
+    const u32 result = (u32)wide;
+    if (wide > 0xFFFFFFFFull) ctx->xer |= XER_CA_BIT;
+    else ctx->xer &= ~XER_CA_BIT;
+    return result;
+}
+
+/* ---------- FPSCR manipulation ---------- */
+
+static inline f64 MFFS(CPUContext* ctx) {
+    u64 bits;
+    f64 result;
+    bits = (u64)ctx->fpscr;
+    memcpy(&result, &bits, sizeof(result));
+    return result;
+}
+
+static inline void MTFSF(CPUContext* ctx, u32 fm, f64 frbValue) {
+    u64 bits;
+    u32 newFpscr;
+    u32 mask = 0;
+    u32 field;
+    memcpy(&bits, &frbValue, sizeof(bits));
+    newFpscr = (u32)bits;
+    for (field = 0; field < 8; ++field) {
+        if (fm & (0x80u >> field)) {
+            mask |= (0xFu << (28 - field * 4));
+        }
+    }
+    ctx->fpscr = (ctx->fpscr & ~mask) | (newFpscr & mask);
+}
+
+static inline void MTFSFI(CPUContext* ctx, u32 crfD, u32 imm) {
+    const u32 shift = 28 - (crfD * 4);
+    ctx->fpscr = (ctx->fpscr & ~(0xFu << shift)) | ((imm & 0xFu) << shift);
+}
+
+static inline void MTFSB0(CPUContext* ctx, u32 bit) {
+    if (bit < 32) {
+        ctx->fpscr &= ~(1u << (31 - bit));
+    }
+}
+
+static inline void MTFSB1(CPUContext* ctx, u32 bit) {
+    if (bit < 32) {
+        ctx->fpscr |= (1u << (31 - bit));
+    }
+}
+
+/* ---------- Store float as integer word (stfiwx) ---------- */
+
+static inline void STFIWX(CPUContext* ctx, u32 frs, u32 addr) {
+    u64 bits;
+    u32 lo;
+    memcpy(&bits, &ctx->fpr[frs], sizeof(bits));
+    lo = (u32)bits;
+    write_be32_mem(addr, lo);
+}
+
+/* ---------- FPU reciprocal estimates ---------- */
+
+static inline f64 FRES(f64 value) {
+    return (f64)(1.0f / (f32)value);
+}
+
+static inline f64 FRSQRTE(f64 value) {
+    return 1.0 / sqrt(value);
+}
+
+/* ---------- Additional CR logical ops ---------- */
+
+static inline void cr_andc(CPUContext* ctx, u32 bt, u32 ba, u32 bb) {
+    set_cr_bit(ctx, bt, get_cr_bit(ctx, ba) & (~get_cr_bit(ctx, bb) & 1u));
+}
+
+static inline void cr_eqv(CPUContext* ctx, u32 bt, u32 ba, u32 bb) {
+    set_cr_bit(ctx, bt, ~(get_cr_bit(ctx, ba) ^ get_cr_bit(ctx, bb)) & 1u);
+}
+
+static inline void cr_nand(CPUContext* ctx, u32 bt, u32 ba, u32 bb) {
+    set_cr_bit(ctx, bt, ~(get_cr_bit(ctx, ba) & get_cr_bit(ctx, bb)) & 1u);
+}
+
+static inline void cr_orc(CPUContext* ctx, u32 bt, u32 ba, u32 bb) {
+    set_cr_bit(ctx, bt, (get_cr_bit(ctx, ba) | (~get_cr_bit(ctx, bb) & 1u)) & 1u);
+}
+
+/* ---------- GQR / Paired-Single Quantized Load/Store ---------- */
+
+/*
+ * GQR (Graphics Quantization Register) layout:
+ *   Bits 16-18: LD_TYPE  (0=f32, 4=u8, 5=u16, 6=s8, 7=s16)
+ *   Bits 19-23: LD_SCALE (0-63; dequant multiplier = 2^(-scale), or 2^(scale-0) for ints)
+ *   Bits  0-2:  ST_TYPE
+ *   Bits  3-7:  ST_SCALE
+ *
+ * For integer types, dequant = value * 2^(-ld_scale), quant = value * 2^(st_scale)
+ *
+ * GQRs are SPRs 912-919.
+ */
+
+#define GQR_SPR_BASE 912
+
+static inline u32 gqr_ld_type(u32 gqr)  { return (gqr >> 16) & 0x7u; }
+static inline u32 gqr_ld_scale(u32 gqr) { return (gqr >> 24) & 0x3Fu; }
+static inline u32 gqr_st_type(u32 gqr)  { return gqr & 0x7u; }
+static inline u32 gqr_st_scale(u32 gqr) { return (gqr >> 8) & 0x3Fu; }
+
+static inline f64 gqr_dequantize_one(u32 addr, u32 type, u32 scale) {
+    const f64 dqScale = (scale == 0) ? 1.0 : (1.0 / (f64)(1u << scale));
+    switch (type) {
+        case 4: /* u8 */
+            return (f64)MEM_READ8(addr) * dqScale;
+        case 5: /* u16 */
+            return (f64)MEM_READ16(addr) * dqScale;
+        case 6: /* s8 */
+            return (f64)(s8)MEM_READ8(addr) * dqScale;
+        case 7: /* s16 */
+            return (f64)(s16)MEM_READ16(addr) * dqScale;
+        case 0: /* f32 */
+        default:
+            return (f64)MEM_READ_FLOAT(addr);
+    }
+}
+
+static inline u32 gqr_type_size(u32 type) {
+    switch (type) {
+        case 4: case 6: return 1; /* u8/s8 */
+        case 5: case 7: return 2; /* u16/s16 */
+        case 0: default: return 4; /* f32 */
+    }
+}
+
+static inline void PSQ_LOAD(CPUContext* ctx, u32 frd, u32 addr, u32 w, u32 gqrIdx) {
+    const u32 gqr = ctx->spr[GQR_SPR_BASE + gqrIdx];
+    const u32 type = gqr_ld_type(gqr);
+    const u32 scale = gqr_ld_scale(gqr);
+    const u32 elemSize = gqr_type_size(type);
+    ctx->ps0[frd] = gqr_dequantize_one(addr, type, scale);
+    if (w == 0) {
+        ctx->ps1[frd] = gqr_dequantize_one(addr + elemSize, type, scale);
+    } else {
+        ctx->ps1[frd] = 1.0;
+    }
+    ctx->fpr[frd] = ctx->ps0[frd];
+}
+
+static inline void gqr_quantize_one(u32 addr, f64 value, u32 type, u32 scale) {
+    const f64 qScale = (scale == 0) ? 1.0 : (f64)(1u << scale);
+    switch (type) {
+        case 4: { /* u8 */
+            s32 v = (s32)(value * qScale + 0.5);
+            if (v < 0) v = 0;
+            if (v > 255) v = 255;
+            MEM_WRITE8(addr, (u8)v);
+            break;
+        }
+        case 5: { /* u16 */
+            s32 v = (s32)(value * qScale + 0.5);
+            if (v < 0) v = 0;
+            if (v > 65535) v = 65535;
+            MEM_WRITE16(addr, (u16)v);
+            break;
+        }
+        case 6: { /* s8 */
+            s32 v = (s32)(value * qScale);
+            if (v < -128) v = -128;
+            if (v > 127) v = 127;
+            MEM_WRITE8(addr, (u8)(s8)v);
+            break;
+        }
+        case 7: { /* s16 */
+            s32 v = (s32)(value * qScale);
+            if (v < -32768) v = -32768;
+            if (v > 32767) v = 32767;
+            MEM_WRITE16(addr, (u16)(s16)v);
+            break;
+        }
+        case 0: /* f32 */
+        default:
+            MEM_WRITE_FLOAT(addr, (f32)value);
+            break;
+    }
+}
+
+static inline void PSQ_STORE(CPUContext* ctx, u32 frs, u32 addr, u32 w, u32 gqrIdx) {
+    const u32 gqr = ctx->spr[GQR_SPR_BASE + gqrIdx];
+    const u32 type = gqr_st_type(gqr);
+    const u32 scale = gqr_st_scale(gqr);
+    const u32 elemSize = gqr_type_size(type);
+    gqr_quantize_one(addr, ctx->ps0[frs], type, scale);
+    if (w == 0) {
+        gqr_quantize_one(addr + elemSize, ctx->ps1[frs], type, scale);
+    }
+}
+
+/* ---------- Paired-single merge helpers ---------- */
+
+static inline void PS_MERGE00(CPUContext* ctx, u32 fd, u32 fa, u32 fb) {
+    ctx->ps0[fd] = ctx->ps0[fa];
+    ctx->ps1[fd] = ctx->ps0[fb];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_MERGE01(CPUContext* ctx, u32 fd, u32 fa, u32 fb) {
+    ctx->ps0[fd] = ctx->ps0[fa];
+    ctx->ps1[fd] = ctx->ps1[fb];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_MERGE10(CPUContext* ctx, u32 fd, u32 fa, u32 fb) {
+    ctx->ps0[fd] = ctx->ps1[fa];
+    ctx->ps1[fd] = ctx->ps0[fb];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_MERGE11(CPUContext* ctx, u32 fd, u32 fa, u32 fb) {
+    ctx->ps0[fd] = ctx->ps1[fa];
+    ctx->ps1[fd] = ctx->ps1[fb];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+/* ---------- Paired-single arithmetic helpers ---------- */
+
+static inline void PS_ADD(CPUContext* ctx, u32 fd, u32 fa, u32 fb) {
+    ctx->ps0[fd] = ctx->ps0[fa] + ctx->ps0[fb];
+    ctx->ps1[fd] = ctx->ps1[fa] + ctx->ps1[fb];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_SUB(CPUContext* ctx, u32 fd, u32 fa, u32 fb) {
+    ctx->ps0[fd] = ctx->ps0[fa] - ctx->ps0[fb];
+    ctx->ps1[fd] = ctx->ps1[fa] - ctx->ps1[fb];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_MUL(CPUContext* ctx, u32 fd, u32 fa, u32 fc) {
+    ctx->ps0[fd] = ctx->ps0[fa] * ctx->ps0[fc];
+    ctx->ps1[fd] = ctx->ps1[fa] * ctx->ps1[fc];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_DIV(CPUContext* ctx, u32 fd, u32 fa, u32 fb) {
+    ctx->ps0[fd] = ctx->ps0[fa] / ctx->ps0[fb];
+    ctx->ps1[fd] = ctx->ps1[fa] / ctx->ps1[fb];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_MADD(CPUContext* ctx, u32 fd, u32 fa, u32 fc, u32 fb) {
+    ctx->ps0[fd] = (ctx->ps0[fa] * ctx->ps0[fc]) + ctx->ps0[fb];
+    ctx->ps1[fd] = (ctx->ps1[fa] * ctx->ps1[fc]) + ctx->ps1[fb];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_MSUB(CPUContext* ctx, u32 fd, u32 fa, u32 fc, u32 fb) {
+    ctx->ps0[fd] = (ctx->ps0[fa] * ctx->ps0[fc]) - ctx->ps0[fb];
+    ctx->ps1[fd] = (ctx->ps1[fa] * ctx->ps1[fc]) - ctx->ps1[fb];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_NMSUB(CPUContext* ctx, u32 fd, u32 fa, u32 fc, u32 fb) {
+    ctx->ps0[fd] = -((ctx->ps0[fa] * ctx->ps0[fc]) - ctx->ps0[fb]);
+    ctx->ps1[fd] = -((ctx->ps1[fa] * ctx->ps1[fc]) - ctx->ps1[fb]);
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_NMADD(CPUContext* ctx, u32 fd, u32 fa, u32 fc, u32 fb) {
+    ctx->ps0[fd] = -((ctx->ps0[fa] * ctx->ps0[fc]) + ctx->ps0[fb]);
+    ctx->ps1[fd] = -((ctx->ps1[fa] * ctx->ps1[fc]) + ctx->ps1[fb]);
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_SUM0(CPUContext* ctx, u32 fd, u32 fa, u32 fc, u32 fb) {
+    ctx->ps0[fd] = ctx->ps0[fa] + ctx->ps1[fb];
+    ctx->ps1[fd] = ctx->ps1[fc];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_SUM1(CPUContext* ctx, u32 fd, u32 fa, u32 fc, u32 fb) {
+    ctx->ps0[fd] = ctx->ps0[fc];
+    ctx->ps1[fd] = ctx->ps0[fa] + ctx->ps1[fb];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_MULS0(CPUContext* ctx, u32 fd, u32 fa, u32 fc) {
+    ctx->ps0[fd] = ctx->ps0[fa] * ctx->ps0[fc];
+    ctx->ps1[fd] = ctx->ps1[fa] * ctx->ps0[fc];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_MULS1(CPUContext* ctx, u32 fd, u32 fa, u32 fc) {
+    ctx->ps0[fd] = ctx->ps0[fa] * ctx->ps1[fc];
+    ctx->ps1[fd] = ctx->ps1[fa] * ctx->ps1[fc];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_MADDS0(CPUContext* ctx, u32 fd, u32 fa, u32 fc, u32 fb) {
+    ctx->ps0[fd] = (ctx->ps0[fa] * ctx->ps0[fc]) + ctx->ps0[fb];
+    ctx->ps1[fd] = (ctx->ps1[fa] * ctx->ps0[fc]) + ctx->ps1[fb];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_MADDS1(CPUContext* ctx, u32 fd, u32 fa, u32 fc, u32 fb) {
+    ctx->ps0[fd] = (ctx->ps0[fa] * ctx->ps1[fc]) + ctx->ps0[fb];
+    ctx->ps1[fd] = (ctx->ps1[fa] * ctx->ps1[fc]) + ctx->ps1[fb];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_SEL(CPUContext* ctx, u32 fd, u32 fa, u32 fc, u32 fb) {
+    ctx->ps0[fd] = (ctx->ps0[fa] >= 0.0) ? ctx->ps0[fc] : ctx->ps0[fb];
+    ctx->ps1[fd] = (ctx->ps1[fa] >= 0.0) ? ctx->ps1[fc] : ctx->ps1[fb];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_NEG_FN(CPUContext* ctx, u32 fd, u32 fb) {
+    ctx->ps0[fd] = -ctx->ps0[fb];
+    ctx->ps1[fd] = -ctx->ps1[fb];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_MR_FN(CPUContext* ctx, u32 fd, u32 fb) {
+    ctx->ps0[fd] = ctx->ps0[fb];
+    ctx->ps1[fd] = ctx->ps1[fb];
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_ABS_FN(CPUContext* ctx, u32 fd, u32 fb) {
+    ctx->ps0[fd] = fabs(ctx->ps0[fb]);
+    ctx->ps1[fd] = fabs(ctx->ps1[fb]);
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_NABS_FN(CPUContext* ctx, u32 fd, u32 fb) {
+    ctx->ps0[fd] = -fabs(ctx->ps0[fb]);
+    ctx->ps1[fd] = -fabs(ctx->ps1[fb]);
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_RES_FN(CPUContext* ctx, u32 fd, u32 fb) {
+    ctx->ps0[fd] = (ctx->ps0[fb] != 0.0) ? (1.0 / ctx->ps0[fb]) : 0.0;
+    ctx->ps1[fd] = (ctx->ps1[fb] != 0.0) ? (1.0 / ctx->ps1[fb]) : 0.0;
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void PS_RSQRTE_FN(CPUContext* ctx, u32 fd, u32 fb) {
+    ctx->ps0[fd] = (ctx->ps0[fb] > 0.0) ? (1.0 / sqrt(ctx->ps0[fb])) : 0.0;
+    ctx->ps1[fd] = (ctx->ps1[fb] > 0.0) ? (1.0 / sqrt(ctx->ps1[fb])) : 0.0;
+    ctx->fpr[fd] = ctx->ps0[fd];
+}
+
+static inline void set_ps_cr_field(CPUContext* ctx, u32 field, f64 a, f64 b) {
+    u32 result = 0;
+    if (a != a || b != b) { result = 1; }
+    else if (a < b) { result = 8; }
+    else if (a > b) { result = 4; }
+    else { result = 2; }
+    {
+        const u32 shift = 28 - (field * 4);
+        ctx->cr = (ctx->cr & ~(0xFu << shift)) | (result << shift);
+    }
+}
+
+/* ---------- dcbz (clear 32-byte cache line) ---------- */
+
+static inline void DCBZ(u32 addr) {
+    u32 a;
+    addr &= ~0x1Fu; /* align to 32-byte boundary */
+    if (translate_ram_addr(addr, &a)) {
+        memset(&ram[a], 0, 32);
+    }
+}
+
 #define EXTSB(x) ((u32)(s32)(s8)(x))
 #define EXTSH(x) ((u32)(s32)(s16)(x))
 #define FSEL(a, b, c) ((a) >= 0.0 ? (b) : (c))
 #define FRSP(x) ((f32)(x))
+#define FNMSUB(a, c, b) (-((a) * (c) - (b)))
+#define FNMADD(a, c, b) (-((a) * (c) + (b)))
+

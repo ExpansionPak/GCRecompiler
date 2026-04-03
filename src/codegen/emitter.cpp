@@ -222,7 +222,19 @@ std::string Emitter::emitInstruction(const IRInstruction& instr,
         case IROp::Andc:   return destGpr(0) + " = " + gpr(1) + " & ~" + gpr(2) + ";";
         case IROp::Orc:    return destGpr(0) + " = " + gpr(1) + " | ~" + gpr(2) + ";";
         case IROp::Nand:   return destGpr(0) + " = ~(" + gpr(1) + " & " + gpr(2) + ");";
+        case IROp::Eqv:    return destGpr(0) + " = ~(" + gpr(1) + " ^ " + gpr(2) + ");";
         case IROp::Addic:  return destGpr(0) + " = ADDIC(ctx, " + gpr(1) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::Neg:    return destGpr(0) + " = (u32)(-(s32)" + gpr(1) + ");";
+        // Carry-chained arithmetic
+        case IROp::Subfc:  return destGpr(0) + " = PPC_SUBFC(ctx, " + gpr(1) + ", " + gpr(2) + ");";
+        case IROp::Addc:   return destGpr(0) + " = PPC_ADDC(ctx, " + gpr(1) + ", " + gpr(2) + ");";
+        case IROp::Subfe:  return destGpr(0) + " = PPC_SUBFE(ctx, " + gpr(1) + ", " + gpr(2) + ");";
+        case IROp::Adde:   return destGpr(0) + " = PPC_ADDE(ctx, " + gpr(1) + ", " + gpr(2) + ");";
+        case IROp::Subfze: return destGpr(0) + " = PPC_SUBFZE(ctx, " + gpr(1) + ");";
+        case IROp::Addze:  return destGpr(0) + " = PPC_ADDZE(ctx, " + gpr(1) + ");";
+        case IROp::Subfme: return destGpr(0) + " = PPC_SUBFME(ctx, " + gpr(1) + ");";
+        case IROp::Addme:  return destGpr(0) + " = PPC_ADDME(ctx, " + gpr(1) + ");";
+
         case IROp::Shl:    return destGpr(0) + " = " + gpr(1) + " << (" + gpr(2) + " & 31);";
         case IROp::Shr:    return destGpr(0) + " = " + gpr(1) + " >> (" + gpr(2) + " & 31);";
         case IROp::Sar:    return destGpr(0) + " = (uint32_t)((int32_t)" + gpr(1) + " >> (" + gpr(2) + " & 31));";
@@ -246,15 +258,36 @@ std::string Emitter::emitInstruction(const IRInstruction& instr,
         case IROp::LoadDouble: return destFpr(0) + " = MEM_READ_DOUBLE(" + gpr(1) + " + " + gpr(2) + ");";
         case IROp::StoreFloat: return "MEM_WRITE_FLOAT(" + gpr(1) + " + " + gpr(2) + ", " + fpr(0) + ");";
         case IROp::StoreDouble:return "MEM_WRITE_DOUBLE(" + gpr(1) + " + " + gpr(2) + ", " + fpr(0) + ");";
+        // FPU indexed loads/stores
+        case IROp::LoadFloatX:    return destFpr(0) + " = MEM_READ_FLOAT(" + gpr(1) + " + " + gpr(2) + ");";
+        case IROp::LoadFloatXU:   return destFpr(0) + " = MEM_READ_FLOAT(" + gpr(1) + " + " + gpr(2) + "); " + destGpr(1) + " = " + gpr(1) + " + " + gpr(2) + ";";
+        case IROp::LoadDoubleX:   return destFpr(0) + " = MEM_READ_DOUBLE(" + gpr(1) + " + " + gpr(2) + ");";
+        case IROp::LoadDoubleXU:  return destFpr(0) + " = MEM_READ_DOUBLE(" + gpr(1) + " + " + gpr(2) + "); " + destGpr(1) + " = " + gpr(1) + " + " + gpr(2) + ";";
+        case IROp::StoreFloatX:   return "MEM_WRITE_FLOAT(" + gpr(1) + " + " + gpr(2) + ", " + fpr(0) + ");";
+        case IROp::StoreFloatXU:  return "MEM_WRITE_FLOAT(" + gpr(1) + " + " + gpr(2) + ", " + fpr(0) + "); " + destGpr(1) + " = " + gpr(1) + " + " + gpr(2) + ";";
+        case IROp::StoreDoubleX:  return "MEM_WRITE_DOUBLE(" + gpr(1) + " + " + gpr(2) + ", " + fpr(0) + ");";
+        case IROp::StoreDoubleXU: return "MEM_WRITE_DOUBLE(" + gpr(1) + " + " + gpr(2) + ", " + fpr(0) + "); " + destGpr(1) + " = " + gpr(1) + " + " + gpr(2) + ";";
+        case IROp::StoreFloatIntX:return "STFIWX(ctx, " + operandToC(instr.operands[0]) + ", " + gpr(1) + " + " + gpr(2) + ");";
         case IROp::Lmw:        return "LMW(ctx, " + std::to_string(instr.operands[0].value) + ", " + gpr(1) + ", " + operandToC(instr.operands[2]) + ");";
         case IROp::Stmw:       return "STMW(ctx, " + std::to_string(instr.operands[0].value) + ", " + gpr(1) + ", " + operandToC(instr.operands[2]) + ");";
+        // PSQ load/store (GQR-decoded)
+        case IROp::PsqLoad:    return "PSQ_LOAD(ctx, " + operandToC(instr.operands[0]) + ", " + gpr(1) + " + " + operandToC(instr.operands[2]) + ", " + operandToC(instr.operands[3]) + ", " + operandToC(instr.operands[4]) + ");";
+        case IROp::PsqLoadU:   return "PSQ_LOAD(ctx, " + operandToC(instr.operands[0]) + ", " + gpr(1) + " + " + operandToC(instr.operands[2]) + ", " + operandToC(instr.operands[3]) + ", " + operandToC(instr.operands[4]) + "); " + destGpr(1) + " = " + gpr(1) + " + " + operandToC(instr.operands[2]) + ";";
+        case IROp::PsqStore:   return "PSQ_STORE(ctx, " + operandToC(instr.operands[0]) + ", " + gpr(1) + " + " + operandToC(instr.operands[2]) + ", " + operandToC(instr.operands[3]) + ", " + operandToC(instr.operands[4]) + ");";
+        case IROp::PsqStoreU:  return "PSQ_STORE(ctx, " + operandToC(instr.operands[0]) + ", " + gpr(1) + " + " + operandToC(instr.operands[2]) + ", " + operandToC(instr.operands[3]) + ", " + operandToC(instr.operands[4]) + "); " + destGpr(1) + " = " + gpr(1) + " + " + operandToC(instr.operands[2]) + ";";
+        case IROp::PsqLoadX:   return "PSQ_LOAD(ctx, " + operandToC(instr.operands[0]) + ", " + gpr(1) + " + " + gpr(2) + ", " + operandToC(instr.operands[3]) + ", " + operandToC(instr.operands[4]) + ");";
+        case IROp::PsqStoreX:  return "PSQ_STORE(ctx, " + operandToC(instr.operands[0]) + ", " + gpr(1) + " + " + gpr(2) + ", " + operandToC(instr.operands[3]) + ", " + operandToC(instr.operands[4]) + ");";
 
         case IROp::Cmp:   return "set_cr_field(ctx, " + operandToC(instr.operands[0]) + ", " + gpr(1) + ", " + gpr(2) + ", 1);";
         case IROp::Cmpl:  return "set_cr_field(ctx, " + operandToC(instr.operands[0]) + ", " + gpr(1) + ", " + gpr(2) + ", 0);";
-        case IROp::CrAnd: return "cr_and(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
-        case IROp::CrOr:  return "cr_or(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
-        case IROp::CrXor: return "cr_xor(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
-        case IROp::CrNor: return "cr_nor(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::CrAnd:  return "cr_and(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::CrOr:   return "cr_or(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::CrXor:  return "cr_xor(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::CrNor:  return "cr_nor(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::CrAndc: return "cr_andc(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::CrEqv:  return "cr_eqv(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::CrNand_:return "cr_nand(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::CrOrc:  return "cr_orc(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
 
         case IROp::Mfcr:  return destGpr(0) + " = ctx->cr;";
         case IROp::Mtcrf: return "mtcrf(ctx, " + operandToC(instr.operands[0]) + ", " + gpr(1) + ");";
@@ -263,20 +296,62 @@ std::string Emitter::emitInstruction(const IRInstruction& instr,
         case IROp::Mfmsr: return destGpr(0) + " = ctx->msr;";
         case IROp::Mtmsr: return "ctx->msr = " + gpr(0) + ";";
 
-        case IROp::FAdd:  return destFpr(0) + " = " + fpr(1) + " + " + fpr(2) + ";";
-        case IROp::FSub:  return destFpr(0) + " = " + fpr(1) + " - " + fpr(2) + ";";
-        case IROp::FMul:  return destFpr(0) + " = " + fpr(1) + " * " + fpr(2) + ";";
-        case IROp::FDiv:  return destFpr(0) + " = " + fpr(1) + " / " + fpr(2) + ";";
-        case IROp::FMadd: return destFpr(0) + " = (" + fpr(1) + " * " + fpr(2) + ") + " + fpr(3) + ";";
-        case IROp::FMsub: return destFpr(0) + " = (" + fpr(1) + " * " + fpr(2) + ") - " + fpr(3) + ";";
-        case IROp::FCmpo: return "set_fp_cr_field(ctx, " + operandToC(instr.operands[0]) + ", " + fpr(1) + ", " + fpr(2) + ", 1);";
-        case IROp::FCmpu: return "set_fp_cr_field(ctx, " + operandToC(instr.operands[0]) + ", " + fpr(1) + ", " + fpr(2) + ", 0);";
-        case IROp::FSel:  return destFpr(0) + " = FSEL(" + fpr(1) + ", " + fpr(2) + ", " + fpr(3) + ");";
-        case IROp::Fctiw: return destFpr(0) + " = FCTIW(" + fpr(1) + ");";
-        case IROp::Frsp:  return destFpr(0) + " = FRSP(" + fpr(1) + ");";
-        case IROp::FNeg:  return destFpr(0) + " = -" + fpr(1) + ";";
-        case IROp::FAbs:  return destFpr(0) + " = fabs(" + fpr(1) + ");";
-        case IROp::Fnabs: return destFpr(0) + " = -fabs(" + fpr(1) + ");";
+        case IROp::FAdd:   return destFpr(0) + " = " + fpr(1) + " + " + fpr(2) + ";";
+        case IROp::FSub:   return destFpr(0) + " = " + fpr(1) + " - " + fpr(2) + ";";
+        case IROp::FMul:   return destFpr(0) + " = " + fpr(1) + " * " + fpr(2) + ";";
+        case IROp::FDiv:   return destFpr(0) + " = " + fpr(1) + " / " + fpr(2) + ";";
+        case IROp::FMadd:  return destFpr(0) + " = (" + fpr(1) + " * " + fpr(2) + ") + " + fpr(3) + ";";
+        case IROp::FMsub:  return destFpr(0) + " = (" + fpr(1) + " * " + fpr(2) + ") - " + fpr(3) + ";";
+        case IROp::FNmsub: return destFpr(0) + " = FNMSUB(" + fpr(1) + ", " + fpr(2) + ", " + fpr(3) + ");";
+        case IROp::FNmadd: return destFpr(0) + " = FNMADD(" + fpr(1) + ", " + fpr(2) + ", " + fpr(3) + ");";
+        case IROp::FCmpo:  return "set_fp_cr_field(ctx, " + operandToC(instr.operands[0]) + ", " + fpr(1) + ", " + fpr(2) + ", 1);";
+        case IROp::FCmpu:  return "set_fp_cr_field(ctx, " + operandToC(instr.operands[0]) + ", " + fpr(1) + ", " + fpr(2) + ", 0);";
+        case IROp::FSel:   return destFpr(0) + " = FSEL(" + fpr(1) + ", " + fpr(2) + ", " + fpr(3) + ");";
+        case IROp::Fctiw:  return destFpr(0) + " = FCTIW(" + fpr(1) + ");";
+        case IROp::Fctiwz: return destFpr(0) + " = FCTIWZ(" + fpr(1) + ");";
+        case IROp::Frsp:   return destFpr(0) + " = FRSP(" + fpr(1) + ");";
+        case IROp::Fres:   return destFpr(0) + " = FRES(" + fpr(1) + ");";
+        case IROp::Frsqrte:return destFpr(0) + " = FRSQRTE(" + fpr(1) + ");";
+        case IROp::FNeg:   return destFpr(0) + " = -" + fpr(1) + ";";
+        case IROp::FAbs:   return destFpr(0) + " = fabs(" + fpr(1) + ");";
+        case IROp::Fnabs:  return destFpr(0) + " = -fabs(" + fpr(1) + ");";
+        // FPSCR manipulation
+        case IROp::Mffs:   return destFpr(0) + " = MFFS(ctx);";
+        case IROp::Mtfsf:  return "MTFSF(ctx, " + operandToC(instr.operands[0]) + ", " + fpr(1) + ");";
+        case IROp::Mtfsfi: return "MTFSFI(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ");";
+        case IROp::Mtfsb0: return "MTFSB0(ctx, " + operandToC(instr.operands[0]) + ");";
+        case IROp::Mtfsb1: return "MTFSB1(ctx, " + operandToC(instr.operands[0]) + ");";
+        // Paired-single arithmetic
+        case IROp::PsAdd:    return "PS_ADD(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::PsSub:    return "PS_SUB(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::PsMul:    return "PS_MUL(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::PsDiv:    return "PS_DIV(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::PsMadd:   return "PS_MADD(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ", " + operandToC(instr.operands[3]) + ");";
+        case IROp::PsMsub:   return "PS_MSUB(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ", " + operandToC(instr.operands[3]) + ");";
+        case IROp::PsNmsub:  return "PS_NMSUB(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ", " + operandToC(instr.operands[3]) + ");";
+        case IROp::PsNmadd:  return "PS_NMADD(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ", " + operandToC(instr.operands[3]) + ");";
+        case IROp::PsSum0:   return "PS_SUM0(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ", " + operandToC(instr.operands[3]) + ");";
+        case IROp::PsSum1:   return "PS_SUM1(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ", " + operandToC(instr.operands[3]) + ");";
+        case IROp::PsMuls0:  return "PS_MULS0(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::PsMuls1:  return "PS_MULS1(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::PsMadds0: return "PS_MADDS0(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ", " + operandToC(instr.operands[3]) + ");";
+        case IROp::PsMadds1: return "PS_MADDS1(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ", " + operandToC(instr.operands[3]) + ");";
+        case IROp::PsSel:    return "PS_SEL(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ", " + operandToC(instr.operands[3]) + ");";
+        case IROp::PsNeg:    return "PS_NEG_FN(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ");";
+        case IROp::PsMr:     return "PS_MR_FN(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ");";
+        case IROp::PsAbs:    return "PS_ABS_FN(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ");";
+        case IROp::PsNabs:   return "PS_NABS_FN(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ");";
+        case IROp::PsRes:    return "PS_RES_FN(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ");";
+        case IROp::PsRsqrte: return "PS_RSQRTE_FN(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ");";
+        case IROp::PsMerge00:return "PS_MERGE00(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::PsMerge01:return "PS_MERGE01(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::PsMerge10:return "PS_MERGE10(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::PsMerge11:return "PS_MERGE11(ctx, " + operandToC(instr.operands[0]) + ", " + operandToC(instr.operands[1]) + ", " + operandToC(instr.operands[2]) + ");";
+        case IROp::PsCmpo0:  return "set_ps_cr_field(ctx, " + operandToC(instr.operands[0]) + ", ctx->ps0[" + operandToC(instr.operands[1]) + "], ctx->ps0[" + operandToC(instr.operands[2]) + "]);";
+        case IROp::PsCmpo1:  return "set_ps_cr_field(ctx, " + operandToC(instr.operands[0]) + ", ctx->ps1[" + operandToC(instr.operands[1]) + "], ctx->ps1[" + operandToC(instr.operands[2]) + "]);";
+        case IROp::PsCmpu0:  return "set_ps_cr_field(ctx, " + operandToC(instr.operands[0]) + ", ctx->ps0[" + operandToC(instr.operands[1]) + "], ctx->ps0[" + operandToC(instr.operands[2]) + "]);";
+        case IROp::PsCmpu1:  return "set_ps_cr_field(ctx, " + operandToC(instr.operands[0]) + ", ctx->ps1[" + operandToC(instr.operands[1]) + "], ctx->ps1[" + operandToC(instr.operands[2]) + "]);";
+
         case IROp::SetReg:
             if (instr.operands[0].regClass == IRRegisterClass::FPR) {
                 return destFpr(0) + " = " + fpr(1) + ";";
@@ -289,7 +364,8 @@ std::string Emitter::emitInstruction(const IRInstruction& instr,
             return "MEM_WRITE32(" + gpr(1) + " + " + gpr(2) + ", " + gpr(0) + ");";
 
         case IROp::Sync:    return "/* sync/eieio */";
-        case IROp::Isync:   return "/* isync/icbi/dcbz */";
+        case IROp::Isync:   return "/* isync/icbi */";
+        case IROp::Dcbz:    return "DCBZ(" + gpr(0) + " + " + gpr(1) + ");";
         case IROp::Trap:    return "abort();";
         case IROp::Syscall: return "/* sc */";
         case IROp::Rfi:     return "ctx->msr = get_spr(ctx, 0x1b); call_by_addr(ctx, get_spr(ctx, 0x1a)); return;";

@@ -14,20 +14,45 @@ enum class IROp {
     Rol, Mask, // For rlwinm etc.
     Rlwimi,    // For rlwimi
     Add, Sub, Mul, MulHighS, MulHighU, DivS, DivU, Addic,
+    // Carry-chained arithmetic
+    Subfc, Addc, Subfe, Adde, Subfze, Addze, Subfme, Addme,
+    Neg,
     // Bit Manipulation
     Extsb, Extsh, Cntlzw,
+    Eqv,
     // Memory
     Load8, Load8u, Load16, Load16u, Load16a, Load32, Load32u, LoadFloat, LoadDouble,
     Store8, Store8u, Store16, Store16u, Store32, Store32u, StoreFloat, StoreDouble,
+    // FPU indexed memory
+    LoadFloatX, LoadFloatXU, LoadDoubleX, LoadDoubleXU,
+    StoreFloatX, StoreFloatXU, StoreDoubleX, StoreDoubleXU, StoreFloatIntX,
     Lmw, Stmw,
+    // Paired-single quantized memory (GQR-decoded)
+    PsqLoad, PsqLoadU, PsqStore, PsqStoreU,
+    PsqLoadX, PsqStoreX,
     // Control Flow
     Branch, BranchCond, BranchIndirect, BranchTable, Call, CallIndirect, Return, Rfi,
     // Comparison
     Cmp, Cmpl,
     CrAnd, CrOr, CrXor, CrNor,
+    CrAndc, CrEqv, CrNand_, CrOrc,
     // Floating Point
-    FAdd, FSub, FMul, FDiv, FMadd, FMsub, FCmpo, FCmpu, FSel, Fctiw, Frsp,
+    FAdd, FSub, FMul, FDiv, FMadd, FMsub, FCmpo, FCmpu, FSel, Fctiw, Fctiwz, Frsp,
     FNeg, FAbs, Fnabs,
+    FNmsub, FNmadd,
+    Fres, Frsqrte,
+    // FPSCR manipulation
+    Mffs, Mtfsf, Mtfsfi, Mtfsb0, Mtfsb1,
+    // Paired-single arithmetic
+    PsAdd, PsSub, PsMul, PsDiv,
+    PsMadd, PsMsub, PsNmsub, PsNmadd,
+    PsSum0, PsSum1, PsMuls0, PsMuls1,
+    PsMadds0, PsMadds1,
+    PsSel,
+    PsNeg, PsMr, PsAbs, PsNabs,
+    PsRes, PsRsqrte,
+    PsMerge00, PsMerge01, PsMerge10, PsMerge11,
+    PsCmpo0, PsCmpo1, PsCmpu0, PsCmpu1,
     // System / Special
     SetReg, GetReg, // Access physical registers
     SetImm,         // Load immediate to virtual reg
@@ -37,6 +62,8 @@ enum class IROp {
     Sync, Isync,
     Trap, Syscall,
     ReservationLoad, ReservationStore,
+    // Data Cache
+    Dcbz,
 };
 
 enum class IROperandType {
