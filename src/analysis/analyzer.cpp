@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <set>
 #include <string>
+#include <sstream>
 
 namespace gcrecomp {
 
