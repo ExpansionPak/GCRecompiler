@@ -5,6 +5,9 @@
 *.bin
 iso/
 
+# Dont let .DS_Store get through!
+.DS_Store
+
 # Don't include build files
 build/
 CMakeFiles/
