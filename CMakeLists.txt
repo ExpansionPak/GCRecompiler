@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_library(gcrecomp_lib
     src/loader/dol.cpp
+    src/loader/rel.cpp
     src/analysis/disasm.cpp
     src/analysis/cfg.cpp
     src/analysis/analyzer.cpp

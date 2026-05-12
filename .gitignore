@@ -28,3 +28,4 @@ gcrecomp.exe
 
 # Output
 output/
+*.log

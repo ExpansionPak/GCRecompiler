@@ -3,7 +3,9 @@
 #include <gcrecomp/log.h>
 #include <fstream>
 #include <filesystem>
+#include <iterator>
 #include <set>
+#include <sstream>
 #include <string>
 #include <sstream>
 
@@ -442,6 +444,593 @@ std::optional<BasicBlock::LocalJumpTable> detectLocalJumpTable(
     return jumpTable;
 }
 
+bool readTextFile(const std::filesystem::path& path, std::string& out) {
+    std::ifstream in(path);
+    if (!in.is_open()) {
+        return false;
+    }
+
+    out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    return true;
+}
+
+bool writeTextFile(const std::filesystem::path& path, const std::string& text) {
+    std::ofstream out(path, std::ios::trunc);
+    if (!out.is_open()) {
+        return false;
+    }
+
+    out << text;
+    return true;
+}
+
+bool replaceOnce(std::string& text, const std::string& from, const std::string& to) {
+    const size_t pos = text.find(from);
+    if (pos == std::string::npos) {
+        return false;
+    }
+
+    text.replace(pos, from.size(), to);
+    return true;
+}
+
+void patchGeneratedGxShader(const std::filesystem::path& shaderPath) {
+    std::string source;
+    if (!readTextFile(shaderPath, source) || source.find("u_tev_color_chan") != std::string::npos) {
+        return;
+    }
+
+    bool changed = false;
+    changed |= replaceOnce(source,
+        "uniform int u_tev_tex_map[GX_MAX_TEV_STAGES];\n",
+        "uniform int u_tev_tex_map[GX_MAX_TEV_STAGES];\n"
+        "uniform int u_tev_color_chan[GX_MAX_TEV_STAGES];\n");
+    changed |= replaceOnce(source,
+        "uniform int u_light_mask;\n"
+        "uniform vec3 u_light_pos[8];\n",
+        "uniform int u_light_mask;\n"
+        "uniform int u_lighting_enabled1;\n"
+        "uniform vec4 u_mat_color1;\n"
+        "uniform vec4 u_amb_color1;\n"
+        "uniform int u_chan_mat_src1;\n"
+        "uniform int u_chan_amb_src1;\n"
+        "uniform int u_alpha_lighting_enabled1;\n"
+        "uniform int u_alpha_mat_src1;\n"
+        "uniform int u_light_mask1;\n"
+        "uniform vec3 u_light_pos[8];\n");
+    changed |= replaceOnce(source,
+        "bool alphaTest(int comp, float val, float ref) {\n"
+        "    const float EPS = 0.5 / 255.0;\n"
+        "    if (comp == 0) return false;                   /* NEVER */\n"
+        "    if (comp == 1) return val < ref;               /* LESS */\n"
+        "    if (comp == 2) return abs(val - ref) < EPS;    /* EQUAL */\n"
+        "    if (comp == 3) return val <= ref;              /* LEQUAL */\n"
+        "    if (comp == 4) return val > ref;               /* GREATER */\n"
+        "    if (comp == 5) return abs(val - ref) >= EPS;   /* NEQUAL */\n"
+        "    if (comp == 6) return val >= ref;              /* GEQUAL */\n"
+        "    return true;                                   /* ALWAYS */\n"
+        "}\n"
+        "\n"
+        "void main() {\n",
+        "bool alphaTest(int comp, float val, float ref) {\n"
+        "    const float EPS = 0.5 / 255.0;\n"
+        "    if (comp == 0) return false;                   /* NEVER */\n"
+        "    if (comp == 1) return val < ref;               /* LESS */\n"
+        "    if (comp == 2) return abs(val - ref) < EPS;    /* EQUAL */\n"
+        "    if (comp == 3) return val <= ref;              /* LEQUAL */\n"
+        "    if (comp == 4) return val > ref;               /* GREATER */\n"
+        "    if (comp == 5) return abs(val - ref) >= EPS;   /* NEQUAL */\n"
+        "    if (comp == 6) return val >= ref;              /* GEQUAL */\n"
+        "    return true;                                   /* ALWAYS */\n"
+        "}\n"
+        "\n"
+        "vec4 evalSimpleChanRGB(int enabled, int matSrc, int ambSrc, vec4 matColor, vec4 ambColor, int lightMask) {\n"
+        "    vec4 outColor;\n"
+        "    vec3 matC = (matSrc != 0) ? v_color.rgb : matColor.rgb;\n"
+        "    vec3 ambC = (ambSrc != 0) ? v_color.rgb : ambColor.rgb;\n"
+        "    if (enabled != 0) {\n"
+        "        vec3 lightAccum = ambC;\n"
+        "        for (int i = 0; i < 8; i++) {\n"
+        "            if ((lightMask & (1 << i)) != 0) {\n"
+        "                vec3 L = normalize(u_light_pos[i]);\n"
+        "                float diff = clamp(dot(v_normal, L), 0.0, 1.0);\n"
+        "                lightAccum += diff * u_light_color[i].rgb;\n"
+        "            }\n"
+        "        }\n"
+        "        outColor.rgb = matC * clamp(lightAccum, 0.0, 1.0);\n"
+        "    } else {\n"
+        "        outColor.rgb = matC;\n"
+        "    }\n"
+        "    outColor.a = (matSrc != 0) ? v_color.a : matColor.a;\n"
+        "    return outColor;\n"
+        "}\n"
+        "\n"
+        "vec4 rasterColorForChan(int chanSel, vec4 ras0, vec4 ras1) {\n"
+        "    if (chanSel == 1 || chanSel == 3 || chanSel == 5 || chanSel == 8) return ras1;\n"
+        "    if (chanSel == 6 || chanSel == 255) return vec4(1.0);\n"
+        "    return ras0;\n"
+        "}\n"
+        "\n"
+        "void main() {\n");
+    changed |= replaceOnce(source,
+        "    /* Rasterized color: GX lighting model */\n"
+        "    vec4 rasColor;\n"
+        "    if (u_num_chans == 0) {\n"
+        "        rasColor = vec4(1.0);\n"
+        "    } else {\n"
+        "        vec3 matC = (u_chan_mat_src != 0) ? v_color.rgb : u_mat_color.rgb;\n"
+        "        vec3 ambC = (u_chan_amb_src != 0) ? v_color.rgb : u_amb_color.rgb;\n"
+        "        if (u_lighting_enabled != 0) {\n"
+        "            vec3 lightAccum = ambC;\n"
+        "            for (int i = 0; i < 8; i++) {\n"
+        "                if ((u_light_mask & (1 << i)) != 0) {\n"
+        "                    vec3 L = normalize(u_light_pos[i]);\n"
+        "                    float diff = clamp(dot(v_normal, L), 0.0, 1.0);\n"
+        "                    lightAccum += diff * u_light_color[i].rgb;\n"
+        "                }\n"
+        "            }\n"
+        "            rasColor.rgb = matC * clamp(lightAccum, 0.0, 1.0);\n"
+        "        } else {\n"
+        "            rasColor.rgb = matC;\n"
+        "        }\n"
+        "\n"
+        "        float matA = (u_alpha_mat_src != 0) ? v_color.a : u_mat_color.a;\n"
+        "        if (u_alpha_lighting_enabled != 0) {\n"
+        "            rasColor.a = matA * u_amb_color.a;\n"
+        "        } else {\n"
+        "            rasColor.a = matA;\n"
+        "        }\n"
+        "    }\n",
+        "    /* Rasterized color: GX lighting model */\n"
+        "    vec4 rasColor0;\n"
+        "    vec4 rasColor1;\n"
+        "    if (u_num_chans == 0) {\n"
+        "        rasColor0 = vec4(1.0);\n"
+        "        rasColor1 = vec4(1.0);\n"
+        "    } else {\n"
+        "        rasColor0 = evalSimpleChanRGB(u_lighting_enabled, u_chan_mat_src, u_chan_amb_src, u_mat_color, u_amb_color, u_light_mask);\n"
+        "        rasColor1 = evalSimpleChanRGB(u_lighting_enabled1, u_chan_mat_src1, u_chan_amb_src1, u_mat_color1, u_amb_color1, u_light_mask1);\n"
+        "\n"
+        "        float matA0 = (u_alpha_mat_src != 0) ? v_color.a : u_mat_color.a;\n"
+        "        rasColor0.a = (u_alpha_lighting_enabled != 0) ? (matA0 * u_amb_color.a) : matA0;\n"
+        "\n"
+        "        float matA1 = (u_alpha_mat_src1 != 0) ? v_color.a : u_mat_color1.a;\n"
+        "        rasColor1.a = (u_alpha_lighting_enabled1 != 0) ? (matA1 * u_amb_color1.a) : matA1;\n"
+        "    }\n");
+    changed |= replaceOnce(source,
+        "        vec4 sRas = applySwap(rasColor, u_swap_table[u_tev_swap[s].x]);\n",
+        "        vec4 sRas = applySwap(rasterColorForChan(u_tev_color_chan[s], rasColor0, rasColor1), u_swap_table[u_tev_swap[s].x]);\n");
+
+    if (changed) {
+        writeTextFile(shaderPath, source);
+    }
+}
+
+void patchGeneratedGxInternal(const std::filesystem::path& internalPath) {
+    std::string source;
+    if (!readTextFile(internalPath, source) || source.find("tev_color_chan[PC_GX_MAX_TEV_STAGES]") != std::string::npos) {
+        return;
+    }
+
+    bool changed = false;
+    changed |= replaceOnce(source,
+        "        GLint alpha_lighting_enabled, alpha_mat_src;\n"
+        "        GLint light_mask, light_pos[8], light_color[8];\n",
+        "        GLint alpha_lighting_enabled, alpha_mat_src;\n"
+        "        GLint lighting_enabled1, mat_color1, amb_color1;\n"
+        "        GLint chan_mat_src1, chan_amb_src1;\n"
+        "        GLint alpha_lighting_enabled1, alpha_mat_src1;\n"
+        "        GLint light_mask, light_mask1, light_pos[8], light_color[8];\n");
+    changed |= replaceOnce(source,
+        "        GLint tev_tc_src[PC_GX_MAX_TEV_STAGES];\n"
+        "        GLint tev_tex_map[PC_GX_MAX_TEV_STAGES];\n",
+        "        GLint tev_tc_src[PC_GX_MAX_TEV_STAGES];\n"
+        "        GLint tev_tex_map[PC_GX_MAX_TEV_STAGES];\n"
+        "        GLint tev_color_chan[PC_GX_MAX_TEV_STAGES];\n");
+
+    if (changed) {
+        writeTextFile(internalPath, source);
+    }
+}
+
+void patchGeneratedGxC(const std::filesystem::path& gxPath) {
+    std::string source;
+    if (!readTextFile(gxPath, source)) {
+        return;
+    }
+
+    bool changed = false;
+    changed |= replaceOnce(source,
+        "        snprintf(name, sizeof(name), \"u_tev_tex_map[%d]\", i);\n"
+        "        g_gx.uloc.tev_tex_map[i] = UL(name);\n"
+        "        snprintf(name, sizeof(name), \"u_tev_ind_cfg[%d]\", i);\n",
+        "        snprintf(name, sizeof(name), \"u_tev_tex_map[%d]\", i);\n"
+        "        g_gx.uloc.tev_tex_map[i] = UL(name);\n"
+        "        snprintf(name, sizeof(name), \"u_tev_color_chan[%d]\", i);\n"
+        "        g_gx.uloc.tev_color_chan[i] = UL(name);\n"
+        "        snprintf(name, sizeof(name), \"u_tev_ind_cfg[%d]\", i);\n");
+    changed |= replaceOnce(source,
+        "    g_gx.uloc.alpha_lighting_enabled = UL(\"u_alpha_lighting_enabled\");\n"
+        "    g_gx.uloc.alpha_mat_src = UL(\"u_alpha_mat_src\");\n"
+        "\n"
+        "    g_gx.uloc.light_mask = UL(\"u_light_mask\");\n",
+        "    g_gx.uloc.alpha_lighting_enabled = UL(\"u_alpha_lighting_enabled\");\n"
+        "    g_gx.uloc.alpha_mat_src = UL(\"u_alpha_mat_src\");\n"
+        "    g_gx.uloc.lighting_enabled1 = UL(\"u_lighting_enabled1\");\n"
+        "    g_gx.uloc.mat_color1 = UL(\"u_mat_color1\");\n"
+        "    g_gx.uloc.amb_color1 = UL(\"u_amb_color1\");\n"
+        "    g_gx.uloc.chan_mat_src1 = UL(\"u_chan_mat_src1\");\n"
+        "    g_gx.uloc.chan_amb_src1 = UL(\"u_chan_amb_src1\");\n"
+        "    g_gx.uloc.alpha_lighting_enabled1 = UL(\"u_alpha_lighting_enabled1\");\n"
+        "    g_gx.uloc.alpha_mat_src1 = UL(\"u_alpha_mat_src1\");\n"
+        "\n"
+        "    g_gx.uloc.light_mask = UL(\"u_light_mask\");\n"
+        "    g_gx.uloc.light_mask1 = UL(\"u_light_mask1\");\n");
+    changed |= replaceOnce(source,
+        "                loc = UL(tev_tex_map[s]); if (loc >= 0) glUniform1i(loc, ts->tex_map);\n"
+        "                loc = UL(tev_bsc[s]);  if (loc >= 0) glUniform4i(loc, ts->color_bias, ts->color_scale, ts->alpha_bias, ts->alpha_scale);\n",
+        "                loc = UL(tev_tex_map[s]); if (loc >= 0) glUniform1i(loc, ts->tex_map);\n"
+        "                loc = UL(tev_color_chan[s]); if (loc >= 0) glUniform1i(loc, ts->color_chan);\n"
+        "                loc = UL(tev_bsc[s]);  if (loc >= 0) glUniform4i(loc, ts->color_bias, ts->color_scale, ts->alpha_bias, ts->alpha_scale);\n");
+    changed |= replaceOnce(source,
+        "            loc = UL(alpha_lighting_enabled); if (loc >= 0) glUniform1i(loc, g_gx.chan_ctrl_enable[1]);\n"
+        "            loc = UL(alpha_mat_src); if (loc >= 0) glUniform1i(loc, g_gx.chan_ctrl_mat_src[1]);\n"
+        "            {\n"
+        "                int color_light_mask = g_gx.chan_ctrl_light_mask[0];\n",
+        "            loc = UL(alpha_lighting_enabled); if (loc >= 0) glUniform1i(loc, g_gx.chan_ctrl_enable[1]);\n"
+        "            loc = UL(alpha_mat_src); if (loc >= 0) glUniform1i(loc, g_gx.chan_ctrl_mat_src[1]);\n"
+        "            loc = UL(lighting_enabled1); if (loc >= 0) glUniform1i(loc, g_gx.chan_ctrl_enable[2]);\n"
+        "            loc = UL(mat_color1); if (loc >= 0) glUniform4fv(loc, 1, g_gx.chan_mat_color[1]);\n"
+        "            loc = UL(amb_color1); if (loc >= 0) glUniform4fv(loc, 1, g_gx.chan_amb_color[1]);\n"
+        "            loc = UL(chan_mat_src1); if (loc >= 0) glUniform1i(loc, g_gx.chan_ctrl_mat_src[2]);\n"
+        "            loc = UL(chan_amb_src1); if (loc >= 0) glUniform1i(loc, g_gx.chan_ctrl_amb_src[2]);\n"
+        "            loc = UL(alpha_lighting_enabled1); if (loc >= 0) glUniform1i(loc, g_gx.chan_ctrl_enable[3]);\n"
+        "            loc = UL(alpha_mat_src1); if (loc >= 0) glUniform1i(loc, g_gx.chan_ctrl_mat_src[3]);\n"
+        "            {\n"
+        "                int color_light_mask1 = g_gx.chan_ctrl_light_mask[2];\n"
+        "                loc = UL(light_mask1); if (loc >= 0) glUniform1i(loc, color_light_mask1);\n"
+        "            }\n"
+        "            {\n"
+        "                int color_light_mask = g_gx.chan_ctrl_light_mask[0];\n");
+    changed |= replaceOnce(source,
+        "            loc = UL(mat_color1); if (loc >= 0) glUniform4f(loc,\n"
+        "                g_gx.chan_mat_color[1].r / 255.0f,\n"
+        "                g_gx.chan_mat_color[1].g / 255.0f,\n"
+        "                g_gx.chan_mat_color[1].b / 255.0f,\n"
+        "                g_gx.chan_mat_color[1].a / 255.0f);\n"
+        "            loc = UL(amb_color1); if (loc >= 0) glUniform4f(loc,\n"
+        "                g_gx.chan_amb_color[1].r / 255.0f,\n"
+        "                g_gx.chan_amb_color[1].g / 255.0f,\n"
+        "                g_gx.chan_amb_color[1].b / 255.0f,\n"
+        "                g_gx.chan_amb_color[1].a / 255.0f);\n",
+        "            loc = UL(mat_color1); if (loc >= 0) glUniform4fv(loc, 1, g_gx.chan_mat_color[1]);\n"
+        "            loc = UL(amb_color1); if (loc >= 0) glUniform4fv(loc, 1, g_gx.chan_amb_color[1]);\n");
+    changed |= replaceOnce(source,
+        "                texcoord_nonzero);\n"
+        "\n"
+        "        if (g_gx.current_primitive == GX_QUADS && count >= 4 &&\n",
+        "                texcoord_nonzero);\n"
+        "\n"
+        "        if (tex0_w > 0 && tex0_h > 0 && ts0->tex_coord >= 0 && ts0->tex_coord < PC_GX_MAX_TEX_GENS) {\n"
+        "            const int tg = ts0->tex_coord;\n"
+        "            const int src_id = g_gx.tex_gen_src[tg];\n"
+        "            const int type_id = g_gx.tex_gen_type[tg];\n"
+        "            const int mtx_id = g_gx.tex_gen_mtx[tg];\n"
+        "            const int slot = pc_tex_mtx_id_to_slot(mtx_id);\n"
+        "            float input[4] = {0.0f, 0.0f, 1.0f, 1.0f};\n"
+        "            float gen_s = 0.0f;\n"
+        "            float gen_t = 0.0f;\n"
+        "            float row0[4] = {1.0f, 0.0f, 0.0f, 0.0f};\n"
+        "            float row1[4] = {0.0f, 1.0f, 0.0f, 0.0f};\n"
+        "\n"
+        "            if (src_id == GX_TG_POS) {\n"
+        "                input[0] = v0->position[0];\n"
+        "                input[1] = v0->position[1];\n"
+        "                input[2] = v0->position[2];\n"
+        "            } else if (src_id >= GX_TG_TEX0 && src_id <= GX_TG_TEX7) {\n"
+        "                const int si = src_id - GX_TG_TEX0;\n"
+        "                input[0] = v0->texcoord[si][0];\n"
+        "                input[1] = v0->texcoord[si][1];\n"
+        "            } else if (src_id == GX_TG_COLOR0) {\n"
+        "                input[0] = v0->color0[0] / 255.0f;\n"
+        "                input[1] = v0->color0[1] / 255.0f;\n"
+        "            } else if (src_id == GX_TG_COLOR1) {\n"
+        "                input[0] = v0->color1[0] / 255.0f;\n"
+        "                input[1] = v0->color1[1] / 255.0f;\n"
+        "            } else if (src_id >= GX_TG_TEXCOORD0 && src_id <= GX_TG_TEXCOORD6) {\n"
+        "                const int si = src_id - GX_TG_TEXCOORD0;\n"
+        "                input[0] = v0->texcoord[si][0];\n"
+        "                input[1] = v0->texcoord[si][1];\n"
+        "            } else {\n"
+        "                input[0] = v0->texcoord[0][0];\n"
+        "                input[1] = v0->texcoord[0][1];\n"
+        "            }\n"
+        "\n"
+        "            if (slot >= 0 && slot < 10) {\n"
+        "                const float* tm = (const float*)g_gx.tex_mtx[slot];\n"
+        "                for (int k = 0; k < 4; ++k) {\n"
+        "                    row0[k] = tm[k];\n"
+        "                    row1[k] = tm[4 + k];\n"
+        "                }\n"
+        "                gen_s = row0[0] * input[0] + row0[1] * input[1] + row0[2] * input[2] + row0[3] * input[3];\n"
+        "                gen_t = row1[0] * input[0] + row1[1] * input[1] + row1[2] * input[2] + row1[3] * input[3];\n"
+        "            } else {\n"
+        "                gen_s = input[0];\n"
+        "                gen_t = input[1];\n"
+        "            }\n"
+        "\n"
+        "            fprintf(stderr,\n"
+        "                    \"[GX/TEXGEN] frame=%d draw=%d stage0_tc=%d map=%d key=0x%08X size=%dx%d src=%d type=%d mtx=%d slot=%d input=%.4f,%.4f,%.4f,%.4f gen=%.6f,%.6f norm_by_tex=%.6f,%.6f row0=%.8f,%.8f,%.8f,%.8f row1=%.8f,%.8f,%.8f,%.8f rawA=0x%08X rawB=0x%08X\\n\",\n"
+        "                    g_pc_gx_frame_number,\n"
+        "                    pc_gx_draw_call_count,\n"
+        "                    tg,\n"
+        "                    tex0_map,\n"
+        "                    (unsigned)((tex0_map >= 0 && tex0_map < 8) ? g_gx.tex_obj_key[tex0_map] : 0u),\n"
+        "                    tex0_w,\n"
+        "                    tex0_h,\n"
+        "                    src_id,\n"
+        "                    type_id,\n"
+        "                    mtx_id,\n"
+        "                    slot,\n"
+        "                    input[0], input[1], input[2], input[3],\n"
+        "                    gen_s,\n"
+        "                    gen_t,\n"
+        "                    tex0_w > 0 ? (gen_s / (float)tex0_w) : 0.0f,\n"
+        "                    tex0_h > 0 ? (gen_t / (float)tex0_h) : 0.0f,\n"
+        "                    row0[0], row0[1], row0[2], row0[3],\n"
+        "                    row1[0], row1[1], row1[2], row1[3],\n"
+        "                    (unsigned)g_pc_gx_fifo.raw_mat_idx_a,\n"
+        "                    (unsigned)g_pc_gx_fifo.raw_mat_idx_b);\n"
+        "        }\n"
+        "\n"
+        "        if (g_gx.current_primitive == GX_QUADS && count >= 4 &&\n");
+
+    if (changed) {
+        writeTextFile(gxPath, source);
+    }
+}
+
+void patchGeneratedPadC(const std::filesystem::path& padPath) {
+    std::string source;
+    if (!readTextFile(padPath, source) || source.find("GCRECOMP_PAD_DISABLE_CONTROLLERS") != std::string::npos) {
+        return;
+    }
+
+    bool changed = false;
+    changed |= replaceOnce(source,
+        "static int g_pad_auto_a_pulses_sent = 0;\n"
+        "static SDL_SpinLock g_pad_snapshot_lock = 0;\n",
+        "static int g_pad_auto_a_pulses_sent = 0;\n"
+        "static int g_pad_disable_controllers_initialized = 0;\n"
+        "static int g_pad_disable_controllers_flag = 0;\n"
+        "static int g_pad_disable_keyboard_initialized = 0;\n"
+        "static int g_pad_disable_keyboard_flag = 0;\n"
+        "static SDL_SpinLock g_pad_snapshot_lock = 0;\n");
+    changed |= replaceOnce(source,
+        "static u32 pc_pad_channel_bit(int channel) {\n",
+        "static int pc_pad_cached_disable_flag(const char* specific_name,\n"
+        "                                      const char* label,\n"
+        "                                      int* initialized,\n"
+        "                                      int* flag) {\n"
+        "    if (!*initialized) {\n"
+        "        *flag = pc_pad_env_flag_enabled(\"GCRECOMP_PAD_DISABLE_INPUT\") ||\n"
+        "                pc_pad_env_flag_enabled(specific_name);\n"
+        "        if (*flag) {\n"
+        "            fprintf(stderr, \"[PAD] %s disabled by env\\n\", label);\n"
+        "        }\n"
+        "        *initialized = 1;\n"
+        "    }\n"
+        "\n"
+        "    return *flag;\n"
+        "}\n"
+        "\n"
+        "static int pc_pad_disable_controllers_enabled(void) {\n"
+        "    return pc_pad_cached_disable_flag(\"GCRECOMP_PAD_DISABLE_CONTROLLERS\",\n"
+        "                                      \"live SDL controllers\",\n"
+        "                                      &g_pad_disable_controllers_initialized,\n"
+        "                                      &g_pad_disable_controllers_flag);\n"
+        "}\n"
+        "\n"
+        "static int pc_pad_disable_keyboard_enabled(void) {\n"
+        "    return pc_pad_cached_disable_flag(\"GCRECOMP_PAD_DISABLE_KEYBOARD\",\n"
+        "                                      \"keyboard input\",\n"
+        "                                      &g_pad_disable_keyboard_initialized,\n"
+        "                                      &g_pad_disable_keyboard_flag);\n"
+        "}\n"
+        "\n"
+        "static u32 pc_pad_channel_bit(int channel) {\n");
+    changed |= replaceOnce(source,
+        "static void pc_pad_refresh_controllers(void) {\n"
+        "    int device_index;\n"
+        "\n"
+        "    pc_pad_prune_detached();\n",
+        "static void pc_pad_refresh_controllers(void) {\n"
+        "    int device_index;\n"
+        "\n"
+        "    if (pc_pad_disable_controllers_enabled()) {\n"
+        "        for (device_index = 0; device_index < PC_PAD_MAX_CONTROLLERS; ++device_index) {\n"
+        "            pc_pad_close_slot(device_index);\n"
+        "        }\n"
+        "        return;\n"
+        "    }\n"
+        "\n"
+        "    pc_pad_prune_detached();\n");
+    changed |= replaceOnce(source,
+        "    /* Suppress keyboard-to-button mapping when typing into the in-game text editor */\n"
+        "    if (!(g_pc_typing_mode && g_pc_editor_active)) {\n",
+        "    /* Suppress keyboard-to-button mapping when typing into the in-game text editor */\n"
+        "    if (!pc_pad_disable_keyboard_enabled() && !(g_pc_typing_mode && g_pc_editor_active)) {\n");
+
+    if (changed) {
+        writeTextFile(padPath, source);
+    }
+}
+
+void patchGeneratedGxTextureC(const std::filesystem::path& texturePath) {
+    std::string source;
+    if (!readTextFile(texturePath, source) || source.find("Dolphin CMPR interpolation") != std::string::npos) {
+        return;
+    }
+
+    bool changed = false;
+    changed |= replaceOnce(source,
+        "                    for (int c = 0; c < 3; c++) {\n"
+        "                        palette[2][c] = (2 * palette[0][c] + palette[1][c]) / 3;\n"
+        "                        palette[3][c] = (palette[0][c] + 2 * palette[1][c]) / 3;\n"
+        "                    }\n",
+        "                    /* Dolphin CMPR interpolation: GX uses a 3/8 blend, not exact thirds. */\n"
+        "                    for (int c = 0; c < 3; c++) {\n"
+        "                        palette[2][c] = (u8)((3 * palette[1][c] + 5 * palette[0][c]) >> 3);\n"
+        "                        palette[3][c] = (u8)((3 * palette[0][c] + 5 * palette[1][c]) >> 3);\n"
+        "                    }\n");
+    changed |= replaceOnce(source,
+        "                    palette[3][0] = palette[3][1] = palette[3][2] = 0;\n"
+        "                    palette[3][3] = 0;\n",
+        "                    /* GX CMPR keeps the averaged RGB for the transparent entry. */\n"
+        "                    palette[3][0] = palette[2][0];\n"
+        "                    palette[3][1] = palette[2][1];\n"
+        "                    palette[3][2] = palette[2][2];\n"
+        "                    palette[3][3] = 0;\n");
+
+    if (changed) {
+        writeTextFile(texturePath, source);
+    }
+}
+
+void patchGeneratedMtxC(const std::filesystem::path& mtxPath) {
+    std::string source;
+    if (!readTextFile(mtxPath, source) || source.find("PSMTXTransApply preserves aliased source rows") != std::string::npos) {
+        return;
+    }
+
+    bool changed = false;
+    changed |= replaceOnce(source,
+        "void PSMTXTransApply(const MtxP src, MtxP dst, f32 tx, f32 ty, f32 tz) {\n"
+        "    f32 in[3][4];\n"
+        "    f32 out[3][4];\n"
+        "    pc_load_mtx34(src, in);\n"
+        "    if (src != dst) {\n"
+        "        out[0][0] = in[0][0];\n"
+        "        out[0][1] = in[0][1];\n"
+        "        out[0][2] = in[0][2];\n"
+        "        out[1][0] = in[1][0];\n"
+        "        out[1][1] = in[1][1];\n"
+        "        out[1][2] = in[1][2];\n"
+        "        out[2][0] = in[2][0];\n"
+        "        out[2][1] = in[2][1];\n"
+        "        out[2][2] = in[2][2];\n"
+        "    }\n"
+        "    out[0][3] = in[0][3] + tx;\n"
+        "    out[1][3] = in[1][3] + ty;\n"
+        "    out[2][3] = in[2][3] + tz;\n"
+        "    pc_store_mtx34(dst, out);\n"
+        "}\n",
+        "void PSMTXTransApply(const MtxP src, MtxP dst, f32 tx, f32 ty, f32 tz) {\n"
+        "    f32 in[3][4];\n"
+        "    f32 out[3][4];\n"
+        "    pc_load_mtx34(src, in);\n"
+        "    /* PSMTXTransApply preserves aliased source rows before adding translation. */\n"
+        "    for (int row = 0; row < 3; ++row) {\n"
+        "        for (int col = 0; col < 4; ++col) {\n"
+        "            out[row][col] = in[row][col];\n"
+        "        }\n"
+        "    }\n"
+        "    out[0][3] = in[0][3] + tx;\n"
+        "    out[1][3] = in[1][3] + ty;\n"
+        "    out[2][3] = in[2][3] + tz;\n"
+        "    pc_store_mtx34(dst, out);\n"
+        "}\n");
+
+    if (changed) {
+        writeTextFile(mtxPath, source);
+    }
+}
+
+void patchGeneratedGxSupport(const std::filesystem::path& outputDir) {
+    const auto gxDir = outputDir / "gx_ems";
+    patchGeneratedGxShader(gxDir / "shaders" / "default.frag");
+    patchGeneratedGxInternal(gxDir / "pc_gx_internal.h");
+    patchGeneratedGxC(gxDir / "pc_gx.c");
+    patchGeneratedGxTextureC(gxDir / "pc_gx_texture.c");
+    patchGeneratedMtxC(gxDir / "pc_mtx.c");
+    patchGeneratedPadC(gxDir / "pc_pad.c");
+}
+
+void patchGeneratedHleStubs(const std::filesystem::path& stubsPath) {
+    std::string source;
+    if (!readTextFile(stubsPath, source)) {
+        return;
+    }
+
+    bool changed = false;
+    if (source.find("runtime_hle_os_load_context") == std::string::npos) {
+        changed |= replaceOnce(source,
+            "/*\n"
+            " * Placeholder for manual runtime hooks.\n"
+            " * Return 1 after handling an address to bypass the generated dispatch table.\n"
+            " */\n",
+            "static int runtime_hle_os_load_context(CPUContext* ctx) {\n"
+            "    const u32 contextAddr = ctx != NULL ? ctx->gpr[3] : 0u;\n"
+            "    const u32 srr0 = contextAddr != 0u ? MEM_READ32(contextAddr + 0x198u) : 0u;\n"
+            "    const u32 srr1 = contextAddr != 0u ? MEM_READ32(contextAddr + 0x19Cu) : 0u;\n"
+            "    static int bad_context_budget = 64;\n"
+            "\n"
+            "    if (ctx == NULL || contextAddr == 0u || runtime_can_dispatch_addr(srr0)) {\n"
+            "        return 0;\n"
+            "    }\n"
+            "\n"
+            "    if (bad_context_budget > 0) {\n"
+            "        fprintf(stderr,\n"
+            "                \"[HLE/OSCTX] skipped invalid OSLoadContext context=0x%08X srr0=0x%08X srr1=0x%08X lr=0x%08X pc=0x%08X state=0x%04X pri=%u ready=0x%08X current=0x%08X\\n\",\n"
+            "                contextAddr,\n"
+            "                srr0,\n"
+            "                srr1,\n"
+            "                ctx->lr,\n"
+            "                ctx->pc,\n"
+            "                MEM_READ16(contextAddr + 0x2C8u),\n"
+            "                MEM_READ32(contextAddr + 0x2D0u),\n"
+            "                ctx->gpr[13] != 0u ? MEM_READ32(ctx->gpr[13] + 0x21D0u) : 0u,\n"
+            "                MEM_READ32(0x800000E4u));\n"
+            "        --bad_context_budget;\n"
+            "    }\n"
+            "\n"
+            "    return 1;\n"
+            "}\n"
+            "\n"
+            "/*\n"
+            " * Placeholder for manual runtime hooks.\n"
+            " * Return 1 after handling an address to bypass the generated dispatch table.\n"
+            " */\n");
+    }
+
+    if (source.find("addr == 0x802971B4u && runtime_hle_os_load_context") == std::string::npos) {
+        changed |= replaceOnce(source,
+            "int try_hle_stub(CPUContext* ctx, u32 addr) {\n",
+            "int try_hle_stub(CPUContext* ctx, u32 addr) {\n"
+            "    if (addr == 0x802971B4u && runtime_hle_os_load_context(ctx)) {\n"
+            "        return 1;\n"
+            "    }\n"
+            "\n");
+    }
+
+    if (source.find("g_gcrecomp_last_pos_mtx_guest_addr = ctx->gpr[3]") == std::string::npos) {
+        changed |= replaceOnce(source,
+            "void GXLoadTexMtxImm(const void* mtx, u32 id, u32 type);\n"
+            "void GXSetCurrentMtx(u32 id);\n",
+            "void GXLoadTexMtxImm(const void* mtx, u32 id, u32 type);\n"
+            "extern u32 g_gcrecomp_last_pos_mtx_guest_addr;\n"
+            "void GXSetCurrentMtx(u32 id);\n");
+        changed |= replaceOnce(source,
+            "    GXLoadPosMtxImm(&g_memory[translated], ctx->gpr[4]);\n",
+            "    g_gcrecomp_last_pos_mtx_guest_addr = ctx->gpr[3];\n"
+            "    GXLoadPosMtxImm(&g_memory[translated], ctx->gpr[4]);\n");
+    }
+
+    if (changed) {
+        writeTextFile(stubsPath, source);
+    }
+}
+
 } // namespace
 
 Analyzer::Analyzer(const Binary &binary) : m_binary(binary) {}
@@ -832,6 +1421,7 @@ void Analyzer::emitAllFunctions(const std::string& outputDir) {
         runtimeHeader << "extern void call_by_addr(CPUContext* ctx, u32 addr);\n\n";
         runtimeHeader << "void runtime_tracef(const char* fmt, ...);\n\n";
         runtimeHeader << "void runtime_dump_recent_guest_calls(FILE* out);\n";
+        runtimeHeader << "int runtime_can_dispatch_addr(u32 addr);\n";
         runtimeHeader << "int runtime_dispatch_interrupt_safe_callbacks(CPUContext* ctx);\n";
         runtimeHeader << "int runtime_idle_host_services(CPUContext* ctx);\n";
         runtimeHeader << "void runtime_begin_gx_display_list(u32 guest_addr, u32 size);\n";
@@ -840,6 +1430,11 @@ void Analyzer::emitAllFunctions(const std::string& outputDir) {
         runtimeHeader << "const char* runtime_debug_request_host_path(u32 req_addr);\n";
         runtimeHeader << "u32 runtime_host_query_request_size(u32 req_addr);\n";
         runtimeHeader << "int runtime_host_read_request(u32 req_addr, u32 offset, u32 dst_addr, u32 length);\n\n";
+        runtimeHeader << "#define PPC_FILL_FPR(ctx_, idx_, value_) do { \\\n";
+        runtimeHeader << "    (ctx_)->fpr[(idx_)] = (f64)(value_); \\\n";
+        runtimeHeader << "    (ctx_)->ps0[(idx_)] = (f64)(value_); \\\n";
+        runtimeHeader << "    (ctx_)->ps1[(idx_)] = (f64)(value_); \\\n";
+        runtimeHeader << "} while (0)\n\n";
         runtimeHeader << "static inline void fn_indirect(CPUContext* ctx, u32 addr) {\n";
         runtimeHeader << "    call_by_addr(ctx, addr);\n";
         runtimeHeader << "}\n\n";
@@ -1000,6 +1595,13 @@ void Analyzer::emitAllFunctions(const std::string& outputDir) {
         jt << "    }\n\n";
         jt << "    return 0;\n";
         jt << "}\n\n";
+        jt << "int runtime_can_dispatch_addr(uint32_t addr) {\n";
+        jt << "    addr = normalize_dispatch_addr(addr);\n";
+        jt << "    return resolve_dispatch_function(addr) != 0;\n";
+        jt << "}\n\n";
+        jt << "static int runtime_is_disp_callback_site(const CPUContext* ctx) {\n";
+        jt << "    return ctx != NULL && ctx->pc == 0x80010B10u && ctx->lr == 0x80010B28u;\n";
+        jt << "}\n\n";
         jt << "void call_by_addr(CPUContext* ctx, uint32_t addr) {\n";
         jt << "    uint32_t functionAddr;\n";
         jt << "    addr = normalize_dispatch_addr(addr);\n";
@@ -1018,6 +1620,17 @@ void Analyzer::emitAllFunctions(const std::string& outputDir) {
         jt << "    }\n";
         jt << "    functionAddr = resolve_dispatch_function(addr);\n";
         jt << "    if (functionAddr == 0) {\n";
+        jt << "        if (runtime_is_disp_callback_site(ctx)) {\n";
+        jt << "            static int disp_bad_callback_budget = 64;\n";
+        jt << "            if (disp_bad_callback_budget > 0) {\n";
+        jt << "                fprintf(stderr, \"[HLE/DISP] Skipped invalid display callback: 0x%08X (lr=0x%08X ctr=0x%08X pc=0x%08X)\\n\", addr, ctx->lr, ctx->ctr, ctx->pc);\n";
+        jt << "                disp_bad_callback_budget--;\n";
+        jt << "            }\n";
+        jt << "            if (g_trace_depth > 0) {\n";
+        jt << "                g_trace_depth--;\n";
+        jt << "            }\n";
+        jt << "            return;\n";
+        jt << "        }\n";
         jt << "        fprintf(stderr, \"[RUNTIME] Unknown function call: 0x%08X (lr=0x%08X ctr=0x%08X pc=0x%08X)\\n\", addr, ctx->lr, ctx->ctr, ctx->pc);\n";
         jt << "        if (g_trace_depth > 0) {\n";
         jt << "            g_trace_depth--;\n";
@@ -1055,6 +1668,9 @@ void Analyzer::emitAllFunctions(const std::string& outputDir) {
             stubs << "}\n";
         }
     }
+
+    patchGeneratedHleStubs(stubsPath);
+    patchGeneratedGxSupport(outputDir);
 }
 
 } // namespace gcrecomp

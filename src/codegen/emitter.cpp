@@ -202,7 +202,7 @@ std::string Emitter::emitInstruction(const IRInstruction& instr,
             ss << "case " << formatHex(blockAddr) << ": goto label_0x"
                << formatImmediate(blockAddr).substr(2) << "; ";
         }
-        ss << "default: call_by_addr(ctx, branch_target); return; } } while (0);";
+        ss << "default: if (runtime_can_dispatch_addr(branch_target)) { call_by_addr(ctx, branch_target); } return; } } while (0);";
         return ss.str();
     };
 

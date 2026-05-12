@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <optional>
+#include <utility>
 
 namespace gcrecomp {
 
@@ -17,6 +18,16 @@ public:
 
     virtual u32 getEntryPoint() const = 0;
     virtual const std::vector<Section>& getSections() const = 0;
+
+    void appendMappedSection(u32 address, u32 fileOffset, bool isText, std::vector<u8> data) {
+        if (data.empty()) {
+            return;
+        }
+
+        m_regions.push_back({address, static_cast<u32>(data.size()), std::move(data)});
+        m_sections.push_back({address, m_regions.back().size, fileOffset, isText});
+        m_lastRegion = nullptr;
+    }
 
     bool isValidAddress(u32 addr) const {
         return findRegion(addr) != nullptr;
