@@ -2,6 +2,9 @@ name: Multi-Platform Build
 
 on: [push, pull_request]
 
+permissions:
+  contents: write  # This allows the action to create releases and upload assets
+
 jobs:
   build:
     name: Build on ${{ matrix.os }}
