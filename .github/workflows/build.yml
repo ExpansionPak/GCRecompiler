@@ -14,30 +14,34 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: false
 
       - name: Set up C++ Environment
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y build-essential
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake
 
-      - name: GCRecompiler (Windows)
+      - name: Set up CMake (Windows)
         if: runner.os == 'Windows'
-        run: g++ main.cpp -o gcrecomp_windows.exe
+        run: choco install cmake -y
 
-      - name: GCRecompiler (Linux)
-        if: runner.os == 'Linux'
-        run: g++ main.cpp -o gcrecomp_linux
-
-      - name: GCRecompiler (macOS)
+      - name: Set up CMake (macOS)
         if: runner.os == 'macOS'
-        # To make a universal binary on macOS:
-        run: |
-          clang++ -arch x86_64 -arch arm64 main.cpp -o gcrecomp_mac_universal
+        run: brew install cmake
+
+      - name: Configure CMake
+        run: cmake -B build -S .
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: cmake --build build --config Release
+
+      - name: Build (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: cmake --build build --config Release
 
       - name: Upload Binaries
         uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.os }}
-          path: |
-            gcrecomp_windows.exe
-            gcrecomp_linux
-            gcrecomp_mac_universal
+          path: build/
