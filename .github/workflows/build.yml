@@ -32,15 +32,41 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install cmake
 
-      - name: Configure CMake
+      - name: Configure CMake (macOS ARM64)
+        if: runner.os == 'macOS'
+        run: cmake -B build-arm64 -S . -DCMAKE_OSX_ARCHITECTURES=arm64
+
+      - name: Build (macOS ARM64)
+        if: runner.os == 'macOS'
+        run: cmake --build build-arm64 --config Release
+
+      - name: Configure CMake (macOS x86_64)
+        if: runner.os == 'macOS'
+        run: cmake -B build-x86_64 -S . -DCMAKE_OSX_ARCHITECTURES=x86_64
+
+      - name: Build (macOS x86_64)
+        if: runner.os == 'macOS'
+        run: cmake --build build-x86_64 --config Release
+
+      - name: Create Universal Binary (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          lipo -create build-arm64/gcrecomp build-x86_64/gcrecomp -output gcrecomp-universal
+
+      - name: Configure CMake (Linux)
+        if: runner.os == 'Linux'
+        run: cmake -B build -S .
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: cmake --build build --config Release
+
+      - name: Configure CMake (Windows)
+        if: runner.os == 'Windows'
         run: cmake -B build -S .
 
       - name: Build (Windows)
         if: runner.os == 'Windows'
-        run: cmake --build build --config Release
-
-      - name: Build (Linux/macOS)
-        if: runner.os != 'Windows'
         run: cmake --build build --config Release
 
       - name: Package Windows
@@ -61,7 +87,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           mkdir -p package
-          cp build/gcrecomp package/
+          cp gcrecomp-universal package/gcrecomp
           zip -r gcrecomp_macos.zip package/
 
       - name: Upload Binaries
